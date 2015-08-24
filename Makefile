@@ -98,6 +98,14 @@ endif
 	ARCH = DARWIN
 endif	# OS Darwin
 
+ifdef EXTENSION
+	include extensions/$(EXTENSION)_Makefile
+	CFLAGS += $(EXTENSION_CFLAGS)
+	LDFLAGS += $(EXTENSION_LDFLAGS)
+	SRCS += extensions/$(EXTENSION)_extension.c
+	CFLAGS += -DEXTENSION_ENABLED
+endif
+
 SRCS += $(ARCH_SRCS)
 CFLAGS += -D_HF_ARCH_${ARCH}
 INTERCEPTOR_SRCS = $(wildcard interceptor/*.c)
