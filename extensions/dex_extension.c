@@ -62,21 +62,27 @@ static void repairDexCRC(uint8_t *buf, off_t fileSz)
  * EXTENSION_CFLAGS
  */
 
+/* -D_HF_MANGLERESIZECALLBACK */
+//void __hf_MangleResizeCallback(honggfuzz_t * hfuzz, uint8_t * buf, size_t * bufSz)
+//{
+//    
+//}
+
 /* -D_HF_MANGLECALLBACK */
-void __hf_MangleCallback(honggfuzz_t *hfuzz, uint8_t *buf, size_t bufSz)
+void __hf_MangleCallback(honggfuzz_t * hfuzz, uint8_t * buf, size_t bufSz)
 {
     // No mangling, just return
     if (hfuzz->flipRate == 0.0L) {
         return;
     }
-    
+
     // Ensure at least 1 change rate > 0.0
     uint64_t changesCnt = bufSz * hfuzz->flipRate;
     if (changesCnt == 0ULL) {
         changesCnt = 1;
     }
     changesCnt = util_rndGet(1, changesCnt);
-    
+
     // Exclude DEX header & trailing MapList from mangling
     const dexHeader *pDexHeader = (const dexHeader*)buf;
     uint32_t start = sizeof(dexHeader);
@@ -90,7 +96,7 @@ void __hf_MangleCallback(honggfuzz_t *hfuzz, uint8_t *buf, size_t bufSz)
 }
 
 /* -D_HF_POSTMANGLECALLBACK */
-void __hf_PostMangleCallback(honggfuzz_t *hfuzz, uint8_t *buf, size_t bufSz)
+void __hf_PostMangleCallback(honggfuzz_t * hfuzz, uint8_t * buf, size_t bufSz)
 {
     if (hfuzz->flipRate != 0.0)
         repairDexCRC(buf, bufSz);
