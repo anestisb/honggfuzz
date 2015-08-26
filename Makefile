@@ -148,7 +148,7 @@ $(MIG_OBJECTS): $(MIG_OUTPUT)
 	$(CC) -c $(CFLAGS) mach_excServer.c
 
 clean:
-	$(RM) -r core $(OBJS) $(BIN) $(MIG_OUTPUT) $(MIG_OBJECTS) $(INTERCEPTOR_LIBS) obj libs
+	$(RM) -r core $(OBJS) $(BIN) $(MIG_OUTPUT) $(MIG_OBJECTS) $(INTERCEPTOR_LIBS) interceptor/*.dSYM extensions/*.o obj libs
 
 indent:
 	indent -linux -l100 -lc100 -nut -i4 *.c *.h */*.c */*.h; rm -f *~ */*~

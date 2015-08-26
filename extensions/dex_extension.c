@@ -11,14 +11,14 @@
 #define API_GE_14  "036"
 #define SHA1Len    20
 
-typedef struct __attribute__((packed)) {
+typedef struct __attribute__ ((packed)) {
     char dex[3];
     char nl[1];
     char ver[3];
     char zero[1];
 } dexMagic;
 
-typedef struct __attribute__((packed)) {
+typedef struct __attribute__ ((packed)) {
     dexMagic magic;
     uint32_t checksum;
     unsigned char signature[SHA1Len];
@@ -45,11 +45,11 @@ typedef struct __attribute__((packed)) {
 } dexHeader;
 
 /* Repair DEX CRC */
-static void repairDexCRC(uint8_t *buf, off_t fileSz)
+static void repairDexCRC(uint8_t * buf, off_t fileSz)
 {
     uint32_t adler_checksum = adler32(0L, Z_NULL, 0);
     const uint8_t non_sum = sizeof(dexMagic) + sizeof(uint32_t);
-    const uint8_t *non_sum_ptr = (const uint8_t*)buf + non_sum;
+    const uint8_t *non_sum_ptr = (const uint8_t *)buf + non_sum;
     adler_checksum = adler32(adler_checksum, non_sum_ptr, fileSz - non_sum);
     memcpy(buf + sizeof(dexMagic), &adler_checksum, sizeof(uint32_t));
     LOGMSG(l_DEBUG, "CRC repaired (0x%08X)", adler_checksum);
@@ -75,7 +75,6 @@ void __hf_MangleCallback(honggfuzz_t * hfuzz, uint8_t * buf, size_t bufSz)
     if (hfuzz->flipRate == 0.0L) {
         return;
     }
-
     // Ensure at least 1 change rate > 0.0
     uint64_t changesCnt = bufSz * hfuzz->flipRate;
     if (changesCnt == 0ULL) {
@@ -84,14 +83,14 @@ void __hf_MangleCallback(honggfuzz_t * hfuzz, uint8_t * buf, size_t bufSz)
     changesCnt = util_rndGet(1, changesCnt);
 
     // Exclude DEX header & trailing MapList from mangling
-    const dexHeader *pDexHeader = (const dexHeader*)buf;
+    const dexHeader *pDexHeader = (const dexHeader *)buf;
     uint32_t start = sizeof(dexHeader);
     uint32_t end = pDexHeader->mapOff;
 
     for (uint64_t x = 0; x < changesCnt; x++) {
         size_t offset = util_rndGet(start, end - 1);
         // byte level mangling
-        buf[offset] = (uint8_t)util_rndGet(0, 255);
+        buf[offset] = (uint8_t) util_rndGet(0, 255);
     }
 }
 
