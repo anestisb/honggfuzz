@@ -152,7 +152,7 @@ $(MIG_OUTPUT): $(SDK)/usr/include/mach/mach_exc.defs
 $(MIG_OBJECTS): $(MIG_OUTPUT)
 	$(CC) -c $(CFLAGS) mach_excUser.c
 	$(CC) -c $(CFLAGS) mach_excServer.c
-	
+
 clean:
 	$(RM) -r core $(OBJS) $(BIN) $(MIG_OUTPUT) $(MIG_OBJECTS) $(INTERCEPTOR_LIBS) $(ANDROID_GARBAGE) $(SUBDIR_GARBAGE)
 
