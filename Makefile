@@ -99,10 +99,10 @@ endif
 endif	# OS Darwin
 
 ifdef EXTENSION
-	include extensions/$(EXTENSION)_Makefile
+	include extensions/$(EXTENSION)/Makefile
 	CFLAGS += $(EXTENSION_CFLAGS)
 	LDFLAGS += $(EXTENSION_LDFLAGS)
-	SRCS += extensions/$(EXTENSION)_extension.c
+	SRCS += $(wildcard extensions/$(EXTENSION)/*.c)
 	CFLAGS += -DEXTENSION_ENABLED
 endif
 
@@ -119,6 +119,12 @@ NDK_BUILD_ARGS :=
 ifeq ($(ANDROID_DEBUG_ENABLED),true)
 	NDK_BUILD_ARGS += V=1 NDK_DEBUG=1 APP_OPTIM=debug
 endif
+
+SUBDIR_ROOTS := interceptor extensions
+DIRS := . $(shell find $(SUBDIR_ROOTS) -type d)
+CLEAN_PATTERNS := *.o *~ core *.a *.dSYM 
+SUBDIR_GARBAGE := $(foreach DIR,$(DIRS),$(addprefix $(DIR)/,$(CLEAN_PATTERNS)))
+ANDROID_GARBAGE := obj libs
 
 all: warn_libs $(BIN) $(INTERCEPTOR_LIBS)
 
@@ -146,9 +152,9 @@ $(MIG_OUTPUT): $(SDK)/usr/include/mach/mach_exc.defs
 $(MIG_OBJECTS): $(MIG_OUTPUT)
 	$(CC) -c $(CFLAGS) mach_excUser.c
 	$(CC) -c $(CFLAGS) mach_excServer.c
-
+	
 clean:
-	$(RM) -r core $(OBJS) $(BIN) $(MIG_OUTPUT) $(MIG_OBJECTS) $(INTERCEPTOR_LIBS) interceptor/*.dSYM extensions/*.o obj libs
+	$(RM) -r core $(OBJS) $(BIN) $(MIG_OUTPUT) $(MIG_OBJECTS) $(INTERCEPTOR_LIBS) $(ANDROID_GARBAGE) $(SUBDIR_GARBAGE)
 
 indent:
 	indent -linux -l100 -lc100 -nut -i4 *.c *.h */*.c */*.h; rm -f *~ */*~

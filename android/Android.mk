@@ -110,10 +110,10 @@ LOCAL_SRC_FILES += $(ARCH_SRCS)
 LOCAL_CFLAGS += -D_HF_ARCH_${ARCH}
 
 ifdef EXTENSION
-  include extensions/$(EXTENSION)_Makefile
+  include extensions/$(EXTENSION)/Makefile
   LOCAL_CFLAGS += $(EXTENSION_CFLAGS)
   LOCAL_LDFLAGS += $(EXTENSION_LDFLAGS)
-  LOCAL_SRC_FILES += extensions/$(EXTENSION)_extension.c
+  LOCAL_SRC_FILES += $(wildcard extensions/$(EXTENSION)/*.c)
   LOCAL_CFLAGS += -DEXTENSION_ENABLED
 endif
 
