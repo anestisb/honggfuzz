@@ -439,7 +439,18 @@ uint64_t arch_ptraceGetCustomPerf(honggfuzz_t * hfuzz, pid_t pid)
 
 static size_t arch_getPC(pid_t pid, REG_TYPE * pc, REG_TYPE * status_reg)
 {
+    /* 
+     * Some old ARM android kernels are failing with PTRACE_GETREGS to extract
+     * the correct register values if struct size is bigger than expected. As such the
+     * 32/64-bit multiplexing trick is not working for them in case PTRACE_GETREGSET
+     * fails or is not implemented. To cover such cases we explicitly define
+     * the struct size to 32bit version for arm CPU.
+     */
+#if defined(__arm__)
+    struct user_regs_struct_32 regs;
+#else
     HEADERS_STRUCT regs;
+#endif
     struct iovec pt_iov = {
         .iov_base = &regs,
         .iov_len = sizeof(regs),
@@ -614,13 +625,13 @@ static void arch_getInstrStr(pid_t pid, REG_TYPE * pc, char *instr)
 }
 
 static void
-arch_ptraceGenerateReport(pid_t pid, fuzzer_t * fuzzer, funcs_t * funcs,
-                          size_t funcCnt, siginfo_t * si, const char *instr)
+arch_ptraceGenerateReport(pid_t pid, fuzzer_t * fuzzer, funcs_t * funcs, size_t funcCnt,
+                          siginfo_t * si, const char *instr, const char *crashName)
 {
     fuzzer->report[0] = '\0';
     util_ssnprintf(fuzzer->report, sizeof(fuzzer->report), "ORIG_FNAME: %s\n",
                    fuzzer->origFileName);
-    util_ssnprintf(fuzzer->report, sizeof(fuzzer->report), "FUZZ_FNAME: %s\n", fuzzer->fileName);
+    util_ssnprintf(fuzzer->report, sizeof(fuzzer->report), "FUZZ_FNAME: %s\n", crashName);
     util_ssnprintf(fuzzer->report, sizeof(fuzzer->report), "PID: %d\n", pid);
     util_ssnprintf(fuzzer->report, sizeof(fuzzer->report), "SIGNAL: %s (%d)\n",
                    arch_sigs[si->si_signo].descr, si->si_signo);
@@ -682,19 +693,19 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
     char newname[PATH_MAX];
     if (hfuzz->saveUnique) {
         snprintf(newname, sizeof(newname),
-                 "%s.PC.%" REG_PM ".CODE.%d.ADDR.%p.INSTR.%s.%s.%s",
-                 arch_sigs[si.si_signo].descr, pc, si.si_code, si.si_addr,
+                 "%s/%s.PC.%" REG_PM ".CODE.%d.ADDR.%p.INSTR.%s.%s.%s",
+                 hfuzz->workDir, arch_sigs[si.si_signo].descr, pc, si.si_code, si.si_addr,
                  instr, fuzzer->origFileName, hfuzz->fileExtn);
     } else {
         char localtmstr[PATH_MAX];
         util_getLocalTime("%F.%H:%M:%S", localtmstr, sizeof(localtmstr));
         snprintf(newname, sizeof(newname),
-                 "%s.PC.%" REG_PM ".CODE.%d.ADDR.%p.INSTR.%s.%s.%d.%s.%s",
-                 arch_sigs[si.si_signo].descr, pc, si.si_code, si.si_addr,
+                 "%s/%s.PC.%" REG_PM ".CODE.%d.ADDR.%p.INSTR.%s.%s.%d.%s.%s",
+                 hfuzz->workDir, arch_sigs[si.si_signo].descr, pc, si.si_code, si.si_addr,
                  instr, localtmstr, pid, fuzzer->origFileName, hfuzz->fileExtn);
     }
 
-    if (link(fuzzer->fileName, newname) == 0) {
+    if (files_copyFile(fuzzer->fileName, newname) == 0) {
         LOGMSG(l_INFO, "Ok, that's interesting, saved '%s' as '%s'", fuzzer->fileName, newname);
     } else {
         if (errno == EEXIST) {
@@ -720,7 +731,8 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
     size_t funcCnt = arch_unwindStack(pid, funcs);
 #endif
 
-    arch_ptraceGenerateReport(pid, fuzzer, funcs, funcCnt, &si, instr);
+    arch_ptraceGenerateReport(pid, fuzzer, funcs, funcCnt, &si, instr, newname);
+    __sync_fetch_and_add(&hfuzz->crashesCnt, 1UL);
 }
 
 #define __WEVENT(status) ((status & 0xFF0000) >> 16)
