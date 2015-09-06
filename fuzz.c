@@ -337,7 +337,7 @@ static void fuzz_fuzzLoop(honggfuzz_t * hfuzz)
         }
     }
 
-    LOGMSG(l_INFO, "Launched new process, pid: %d, (concurrency: %d)", fuzzer.pid,
+    LOGMSG(l_DEBUG, "Launched new process, pid: %d, (concurrency: %d)", fuzzer.pid,
            hfuzz->threadsMax);
 
     arch_reapChild(hfuzz, &fuzzer);
@@ -346,7 +346,7 @@ static void fuzz_fuzzLoop(honggfuzz_t * hfuzz)
     if (hfuzz->dynFileMethod != _HF_DYNFILE_NONE) {
         MX_LOCK(&hfuzz->dynamicFile_mutex);
 
-        LOGMSG(l_INFO,
+        LOGMSG(l_DEBUG,
                "File size (New/Best): %zu/%zu, Perf feedback (instr/branch/block-edge/custom): Best: [%"
                PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 "] / New: [%" PRIu64 ",%" PRIu64 ",%"
                PRIu64 ",%" PRIu64 "]", fuzzer.dynamicFileSz, hfuzz->dynamicFileBestSz,
@@ -414,15 +414,12 @@ static void *fuzz_threadNew(void *arg)
 {
     honggfuzz_t *hfuzz = (honggfuzz_t *) arg;
     for (;;) {
-        MX_LOCK(&hfuzz->threads_mutex);
-        if (hfuzz->mutationsMax && hfuzz->mutationsCnt >= hfuzz->mutationsMax) {
-            hfuzz->threadsFinished++;
-            MX_UNLOCK(&hfuzz->threads_mutex);
+        if ((__sync_fetch_and_add(&hfuzz->mutationsCnt, 1UL) >= hfuzz->mutationsMax)
+            && hfuzz->mutationsMax) {
+            __sync_fetch_and_add(&hfuzz->threadsFinished, 1UL);
             sem_post(hfuzz->sem);
             return NULL;
         }
-        __sync_fetch_and_add(&hfuzz->mutationsCnt, 1UL);
-        MX_UNLOCK(&hfuzz->threads_mutex);
 
         fuzz_fuzzLoop(hfuzz);
     }
@@ -458,7 +455,6 @@ bool fuzz_setupTimer(void)
     struct sigaction sa = {
         .sa_handler = SIG_IGN,
         .sa_flags = 0,
-        .sa_restorer = NULL,
     };
     sigemptyset(&sa.sa_mask);
     if (sigaction(SIGALRM, &sa, NULL) == -1) {
@@ -524,26 +520,19 @@ void fuzz_main(honggfuzz_t * hfuzz)
     }
 
     for (;;) {
+        if (hfuzz->useScreen) {
+            display_display(hfuzz);
+        }
         if (sem_wait(hfuzz->sem) == -1 && errno != EINTR) {
             LOGMSG_P(l_FATAL, "sem_wait() failed");
         }
         if (fuzz_sigReceived > 0) {
             break;
         }
-
-        if (hfuzz->useScreen) {
-            display_Display(hfuzz);
-        }
-
-        MX_LOCK(&hfuzz->threads_mutex);
-        if (hfuzz->threadsFinished == hfuzz->threadsMax) {
-            MX_UNLOCK(&hfuzz->threads_mutex);
+        if (__sync_fetch_and_add(&hfuzz->threadsFinished, 0UL) >= hfuzz->threadsMax) {
             break;
         }
-        MX_UNLOCK(&hfuzz->threads_mutex);
     }
-
-    LOGMSG(l_INFO, "Finished fuzzing %zu times", hfuzz->mutationsCnt);
 
     if (fuzz_sigReceived > 0) {
         LOGMSG(l_INFO, "Signal %d received, terminating", fuzz_sigReceived);
@@ -552,6 +541,8 @@ void fuzz_main(honggfuzz_t * hfuzz)
         signal(SIGQUIT, SIG_DFL);
         raise(fuzz_sigReceived);
     }
+
+    LOGMSG(l_INFO, "Fuzzing finished");
 #ifdef __ANDROID__
     sem_destroy(&semName);
 #else
