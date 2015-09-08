@@ -25,6 +25,7 @@
 #include "report.h"
 
 #include <fcntl.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -80,7 +81,7 @@ void report_Report(honggfuzz_t * hfuzz, char *s)
     }
 
     char localtmstr[PATH_MAX];
-    util_getLocalTime("%F.%H:%M:%S", localtmstr, sizeof(localtmstr));
+    util_getLocalTime("%F.%H:%M:%S", localtmstr, sizeof(localtmstr), time(NULL));
 
     dprintf(reportFD,
             "=====================================================================\n"
@@ -92,7 +93,7 @@ void report_Report(honggfuzz_t * hfuzz, char *s)
             " fuzzStdin    : %s\n"
             " timeout      : %ld (sec)\n"
             " ignoreAddr   : %p\n"
-            " memoryLimit  : %lu (MiB)\n"
+            " memoryLimit  : %" PRIu64 " (MiB)\n"
             " targetPid    : %d\n"
             " wordlistFile : %s\n",
             localtmstr,

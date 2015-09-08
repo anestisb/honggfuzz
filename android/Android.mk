@@ -18,6 +18,12 @@ LOCAL_PATH := $(abspath $(call my-dir)/..)
 # Enable Linux ptrace() instead of POSIX signal interface by default 
 ANDROID_WITH_PTRACE ?= true
 
+# Make sure compiler toolchain is compatible / supported
+ifneq (,$(findstring clang,$(NDK_TOOLCHAIN)))
+  $(error Clang toolchains are not supported yet. Clang uses __aeabi_read_tp to \
+  implement thread_local, which isn't supported by bionic [$(NDK_TOOLCHAIN)])
+endif
+
 ifeq ($(ANDROID_WITH_PTRACE),true)
   ifeq ($(APP_ABI),$(filter $(APP_ABI),armeabi armeabi-v7a))
     ARCH_ABI := arm
@@ -82,7 +88,7 @@ endif
 include $(CLEAR_VARS)
 
 LOCAL_MODULE := honggfuzz
-LOCAL_SRC_FILES := honggfuzz.c log.c files.c fuzz.c report.c mangle.c util.c
+LOCAL_SRC_FILES := honggfuzz.c display.c log.c files.c fuzz.c report.c mangle.c util.c
 LOCAL_CFLAGS := -std=c11 -I. \
     -D_GNU_SOURCE \
     -Wall -Wextra -Wno-initializer-overrides -Wno-override-init \
