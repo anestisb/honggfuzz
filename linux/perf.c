@@ -42,7 +42,7 @@
 #include "log.h"
 #include "util.h"
 
-#define _HF_RT_SIG (SIGIO)
+#define _HF_RT_SIG (SIGRTMIN + 10)
 
 /* Buffer used with BTS (branch recording) */
 static __thread uint8_t *perfMmapBuf = NULL;
@@ -57,8 +57,14 @@ static __thread uint64_t perfCutOffAddr = ~(0ULL);
 /* Perf method - to be used in signal handlers */
 static __thread dynFileMethod_t perfDynamicMethod = _HF_DYNFILE_NONE;
 
-#define _HF_PERF_BLOOM_SZ (1024 * 1024 * 2)
-static __thread uint8_t perfBloom[_HF_PERF_BLOOM_SZ];
+#if __BITS_PER_LONG == 64
+#define _HF_PERF_BLOOM_SZ (1024ULL * 1024ULL * 1024ULL)
+#elif __BITS_PER_LONG == 32
+#define _HF_PERF_BLOOM_SZ (1024ULL * 1024ULL * 128ULL)
+#else
+#error "__BITS_PER_LONG not defined"
+#endif
+static __thread uint8_t *perfBloom = NULL;
 
 static size_t arch_perfCountBranches(void)
 {
@@ -80,19 +86,17 @@ static inline void arch_perfAddBranch(uint64_t from, uint64_t to)
         return;
     }
 
-    /* It's 24-bit max, so should fit in a 2MB bitmap */
-    size_t pos = 0ULL;
+    register size_t pos = 0ULL;
     if (perfDynamicMethod == _HF_DYNFILE_UNIQUE_BLOCK_COUNT) {
-        pos = from & 0xFFFFFF;
-    }
-    if (perfDynamicMethod == _HF_DYNFILE_UNIQUE_EDGE_COUNT) {
-        pos = ((from & 0xFFF) | ((to << 12) & 0xFFF000));
+        pos = from % (_HF_PERF_BLOOM_SZ * 8);
+    } else if (perfDynamicMethod == _HF_DYNFILE_UNIQUE_EDGE_COUNT) {
+        pos = (from * to) % (_HF_PERF_BLOOM_SZ * 8);
     }
 
     size_t byteOff = pos / 8;
     size_t bitOff = pos % 8;
 
-    uint8_t prev = __sync_fetch_and_or(&perfBloom[byteOff], ((uint8_t) 1 << bitOff));
+    register uint8_t prev = __sync_fetch_and_or(&perfBloom[byteOff], ((uint8_t) 1 << bitOff));
     if ((prev & ((uint8_t) 1 << bitOff)) == 0) {
         perfBranchesCnt++;
     }
@@ -105,9 +109,9 @@ static inline uint64_t arch_perfGetMmap64(bool fatal)
 {
     struct perf_event_mmap_page *pem = (struct perf_event_mmap_page *)perfMmapBuf;
 
+    rmb();
     register uint64_t dataHeadOff = pem->data_head % perfMmapSz;
     register uint64_t dataTailOff = pem->data_tail % perfMmapSz;
-    rmb();
     /* Memory barrier - needed as per perf_event_open(2) */
 
     if (__builtin_expect(dataHeadOff == dataTailOff, false)) {
@@ -167,21 +171,13 @@ static long perf_event_open(struct perf_event_attr *hw_event, pid_t pid, int cpu
     return syscall(__NR_perf_event_open, hw_event, pid, cpu, group_fd, flags);
 }
 
-static void arch_perfSigHandler(int signum, siginfo_t * si, void *unused)
+static void arch_perfSigHandler(int signum)
 {
     if (__builtin_expect(signum != _HF_RT_SIG, false)) {
         return;
     }
-    if (__builtin_expect(si->si_code != POLL_IN, false)) {
-        return;
-    }
-
     arch_perfMmapParse();
     return;
-
-    if (unused == NULL) {
-        return;
-    }
 }
 
 static size_t arch_perfGetMmapBufSz(honggfuzz_t * hfuzz)
@@ -235,23 +231,19 @@ static bool arch_perfOpen(pid_t pid, dynFileMethod_t method, int *perfFd)
         pe.inherit = 1;
         break;
     case _HF_DYNFILE_UNIQUE_BLOCK_COUNT:
-        bzero(perfBloom, sizeof(perfBloom));
         LOGMSG(l_DEBUG, "Using: PERF_SAMPLE_BRANCH_STACK/PERF_SAMPLE_IP for PID: %d", pid);
         pe.config = PERF_COUNT_HW_BRANCH_INSTRUCTIONS;
         pe.sample_type = PERF_SAMPLE_IP;
         pe.sample_period = 1;   /* It's BTS based, so must be equal to 1 */
-        pe.watermark = 1;
-        pe.wakeup_watermark = perfMmapSz / 32;
+        pe.wakeup_events = 0;
         break;
     case _HF_DYNFILE_UNIQUE_EDGE_COUNT:
-        bzero(perfBloom, sizeof(perfBloom));
         LOGMSG(l_DEBUG,
                "Using: PERF_SAMPLE_BRANCH_STACK/PERF_SAMPLE_IP|PERF_SAMPLE_ADDR for PID: %d", pid);
         pe.config = PERF_COUNT_HW_BRANCH_INSTRUCTIONS;
         pe.sample_type = PERF_SAMPLE_IP | PERF_SAMPLE_ADDR;
         pe.sample_period = 1;   /* It's BTS based, so must be equal to 1 */
-        pe.watermark = 1;
-        pe.wakeup_watermark = perfMmapSz / 32;
+        pe.wakeup_events = 0;
         break;
     default:
         LOGMSG(l_ERROR, "Unknown perf mode: '%d' for PID: %d", method, pid);
@@ -263,7 +255,8 @@ static bool arch_perfOpen(pid_t pid, dynFileMethod_t method, int *perfFd)
     if (*perfFd == -1) {
         if (method == _HF_DYNFILE_UNIQUE_BLOCK_COUNT || method == _HF_DYNFILE_UNIQUE_EDGE_COUNT) {
             LOGMSG(l_ERROR,
-                   "-Dp/-De mode (sample IP/jump) requires LBR/BTS, which present in Intel Haswell and newer CPUs (i.e. not in AMD CPUs)");
+                   "-Dp/-De mode (sample IP/jump) requires LBR/BTS, which present in Intel Haswell "
+                   "and newer CPUs (i.e. not in AMD CPUs)");
         }
         LOGMSG_P(l_FATAL, "perf_event_open() failed");
         return false;
@@ -281,15 +274,11 @@ static bool arch_perfOpen(pid_t pid, dynFileMethod_t method, int *perfFd)
         return false;
     }
 
-    sigset_t smask;
-    sigemptyset(&smask);
     struct sigaction sa = {
-        .sa_handler = NULL,
-        .sa_sigaction = arch_perfSigHandler,
-        .sa_mask = smask,
-        .sa_flags = SA_SIGINFO | SA_RESTART,
-        .sa_restorer = NULL
+        .sa_handler = arch_perfSigHandler,
+        .sa_flags = SA_RESTART,
     };
+    sigemptyset(&sa.sa_mask);
     if (sigaction(_HF_RT_SIG, &sa, NULL) == -1) {
         LOGMSG_P(l_ERROR, "sigaction() failed");
         return false;
@@ -317,67 +306,66 @@ static bool arch_perfOpen(pid_t pid, dynFileMethod_t method, int *perfFd)
     return true;
 }
 
-bool arch_perfEnable(pid_t pid, honggfuzz_t * hfuzz, int *perfFd)
+bool arch_perfEnable(pid_t pid, honggfuzz_t * hfuzz, perfFd_t * perfFds)
 {
     if (hfuzz->dynFileMethod == _HF_DYNFILE_NONE) {
         return true;
     }
-
-    perfMmapSz = arch_perfGetMmapBufSz(hfuzz);
-    perfCutOffAddr = hfuzz->dynamicCutOffAddr;
-
-    perfFd[0] = -1;
-    perfFd[1] = -1;
-    perfFd[2] = -1;
-
-    if (hfuzz->dynFileMethod & _HF_DYNFILE_INSTR_COUNT) {
-        if (arch_perfOpen(pid, _HF_DYNFILE_INSTR_COUNT, &perfFd[0]) == false) {
-            LOGMSG(l_ERROR, "Cannot set up perf for PID=%d (_HF_DYNFILE_INSTR_COUNT)", pid);
-            close(perfFd[0]);
-            close(perfFd[1]);
-            close(perfFd[2]);
-            return false;
-        }
-    }
-    if (hfuzz->dynFileMethod & _HF_DYNFILE_BRANCH_COUNT) {
-        if (arch_perfOpen(pid, _HF_DYNFILE_BRANCH_COUNT, &perfFd[1]) == false) {
-            LOGMSG(l_ERROR, "Cannot set up perf for PID=%d (_HF_DYNFILE_BRANCH_COUNT)", pid);
-            close(perfFd[0]);
-            close(perfFd[1]);
-            close(perfFd[2]);
-            return false;
-        }
-    }
-
     if ((hfuzz->dynFileMethod & _HF_DYNFILE_UNIQUE_BLOCK_COUNT)
         && (hfuzz->dynFileMethod & _HF_DYNFILE_UNIQUE_EDGE_COUNT)) {
         LOGMSG(l_FATAL,
                "_HF_DYNFILE_UNIQUE_BLOCK_COUNT and _HF_DYNFILE_UNIQUE_EDGE_COUNT cannot be specified together");
     }
 
+    perfBloom =
+        mmap(NULL, _HF_PERF_BLOOM_SZ, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (perfBloom == MAP_FAILED) {
+        LOGMSG_P(l_FATAL, "mmap(size=%zu) failed", _HF_PERF_BLOOM_SZ);
+    }
+
+    perfMmapSz = arch_perfGetMmapBufSz(hfuzz);
+    perfCutOffAddr = hfuzz->dynamicCutOffAddr;
+
+    perfFds->cpuInstrFd = -1;
+    perfFds->cpuBranchFd = -1;
+    perfFds->uniquePcFd = -1;
+    perfFds->uniqueEdgeFd = -1;
+
+    if (hfuzz->dynFileMethod & _HF_DYNFILE_INSTR_COUNT) {
+        if (arch_perfOpen(pid, _HF_DYNFILE_INSTR_COUNT, &perfFds->cpuInstrFd) == false) {
+            LOGMSG(l_ERROR, "Cannot set up perf for PID=%d (_HF_DYNFILE_INSTR_COUNT)", pid);
+            goto out;
+        }
+    }
+    if (hfuzz->dynFileMethod & _HF_DYNFILE_BRANCH_COUNT) {
+        if (arch_perfOpen(pid, _HF_DYNFILE_BRANCH_COUNT, &perfFds->cpuBranchFd) == false) {
+            LOGMSG(l_ERROR, "Cannot set up perf for PID=%d (_HF_DYNFILE_BRANCH_COUNT)", pid);
+            goto out;
+        }
+    }
     if (hfuzz->dynFileMethod & _HF_DYNFILE_UNIQUE_BLOCK_COUNT) {
-        if (arch_perfOpen(pid, _HF_DYNFILE_UNIQUE_BLOCK_COUNT, &perfFd[2]) == false) {
+        if (arch_perfOpen(pid, _HF_DYNFILE_UNIQUE_BLOCK_COUNT, &perfFds->uniquePcFd) == false) {
             LOGMSG(l_ERROR, "Cannot set up perf for PID=%d (_HF_DYNFILE_UNIQUE_BLOCK_COUNT)", pid);
-            close(perfFd[0]);
-            close(perfFd[1]);
-            close(perfFd[2]);
-            return false;
+            goto out;
         }
     }
     if (hfuzz->dynFileMethod & _HF_DYNFILE_UNIQUE_EDGE_COUNT) {
-        if (arch_perfOpen(pid, _HF_DYNFILE_UNIQUE_EDGE_COUNT, &perfFd[2]) == false) {
+        if (arch_perfOpen(pid, _HF_DYNFILE_UNIQUE_EDGE_COUNT, &perfFds->uniqueEdgeFd) == false) {
             LOGMSG(l_ERROR, "Cannot set up perf for PID=%d (_HF_DYNFILE_UNIQUE_EDGE_COUNT)", pid);
-            close(perfFd[0]);
-            close(perfFd[1]);
-            close(perfFd[2]);
-            return false;
+            goto out;
         }
     }
 
     return true;
+ out:
+    close(perfFds->cpuInstrFd);
+    close(perfFds->cpuBranchFd);
+    close(perfFds->uniquePcFd);
+    close(perfFds->uniqueEdgeFd);
+    return false;
 }
 
-void arch_perfAnalyze(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, int *perfFd)
+void arch_perfAnalyze(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, perfFd_t * perfFds)
 {
     if (hfuzz->dynFileMethod == _HF_DYNFILE_NONE) {
         return;
@@ -385,27 +373,41 @@ void arch_perfAnalyze(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, int *perfFd)
 
     uint64_t instrCount = 0;
     if (hfuzz->dynFileMethod & _HF_DYNFILE_INSTR_COUNT) {
-        ioctl(perfFd[0], PERF_EVENT_IOC_DISABLE, 0);
-        if (read(perfFd[0], &instrCount, sizeof(instrCount)) != sizeof(instrCount)) {
-            LOGMSG_P(l_ERROR, "read(perfFd='%d') failed", perfFd);
+        ioctl(perfFds->cpuInstrFd, PERF_EVENT_IOC_DISABLE, 0);
+        if (read(perfFds->cpuInstrFd, &instrCount, sizeof(instrCount)) != sizeof(instrCount)) {
+            LOGMSG_P(l_ERROR, "read(perfFd='%d') failed", perfFds->cpuInstrFd);
         }
-        close(perfFd[0]);
+        close(perfFds->cpuInstrFd);
     }
 
     uint64_t branchCount = 0;
     if (hfuzz->dynFileMethod & _HF_DYNFILE_BRANCH_COUNT) {
-        ioctl(perfFd[1], PERF_EVENT_IOC_DISABLE, 0);
-        if (read(perfFd[1], &branchCount, sizeof(branchCount)) != sizeof(branchCount)) {
-            LOGMSG_P(l_ERROR, "read(perfFd='%d') failed", perfFd);
+        ioctl(perfFds->cpuBranchFd, PERF_EVENT_IOC_DISABLE, 0);
+        if (read(perfFds->cpuBranchFd, &branchCount, sizeof(branchCount)) != sizeof(branchCount)) {
+            LOGMSG_P(l_ERROR, "read(perfFd='%d') failed", perfFds->cpuBranchFd);
         }
-        close(perfFd[1]);
+        close(perfFds->cpuBranchFd);
+    }
+
+    uint64_t pathCount = 0;
+    if (hfuzz->dynFileMethod & _HF_DYNFILE_UNIQUE_BLOCK_COUNT) {
+        ioctl(perfFds->uniquePcFd, PERF_EVENT_IOC_DISABLE, 0);
+        close(perfFds->uniquePcFd);
+        arch_perfMmapParse();
+        pathCount = arch_perfCountBranches();
+
+        if (perfRecordsLost > 0UL) {
+            LOGMSG(l_WARN,
+                   "%" PRId64
+                   " PERF_RECORD_LOST events received, possibly too many concurrent fuzzing threads in progress",
+                   perfRecordsLost);
+        }
     }
 
     uint64_t edgeCount = 0;
-    if ((hfuzz->dynFileMethod & _HF_DYNFILE_UNIQUE_BLOCK_COUNT)
-        || (hfuzz->dynFileMethod & _HF_DYNFILE_UNIQUE_EDGE_COUNT)) {
-        ioctl(perfFd[2], PERF_EVENT_IOC_DISABLE, 0);
-        close(perfFd[2]);
+    if (hfuzz->dynFileMethod & _HF_DYNFILE_UNIQUE_EDGE_COUNT) {
+        ioctl(perfFds->uniqueEdgeFd, PERF_EVENT_IOC_DISABLE, 0);
+        close(perfFds->uniqueEdgeFd);
         arch_perfMmapParse();
         edgeCount = arch_perfCountBranches();
 
@@ -420,10 +422,12 @@ void arch_perfAnalyze(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, int *perfFd)
     if (perfMmapBuf != NULL) {
         munmap(perfMmapBuf, perfMmapSz + getpagesize());
     }
+    munmap(perfBloom, _HF_PERF_BLOOM_SZ);
 
-    fuzzer->branchCnt[0] = instrCount;
-    fuzzer->branchCnt[1] = branchCount;
-    fuzzer->branchCnt[2] = edgeCount;
+    fuzzer->hwCnts.cpuInstrCnt = instrCount;
+    fuzzer->hwCnts.cpuBranchCnt = branchCount;
+    fuzzer->hwCnts.pcCnt = pathCount;
+    fuzzer->hwCnts.pathCnt = edgeCount;
 
     return;
 }
