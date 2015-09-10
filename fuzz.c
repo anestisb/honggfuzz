@@ -140,24 +140,21 @@ static bool fuzz_prepareFileDynamically(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, 
     /* The first pass should be on an empty/initial file */
     if (hfuzz->hwCnts.cpuInstrCnt > 0 || hfuzz->hwCnts.cpuBranchCnt > 0 || hfuzz->hwCnts.pcCnt > 0
         || hfuzz->hwCnts.pathCnt > 0 || hfuzz->hwCnts.customCnt > 0) {
-#ifndef EXTENSION_ENABLED
-        mangle_Resize(hfuzz, fuzzer->dynamicFile, &fuzzer->dynamicFileSz);
-        mangle_mangleContent(hfuzz, fuzzer->dynamicFile, fuzzer->dynamicFileSz);
-#else
-#ifdef _HF_MANGLERESIZECALLBACK
+
+#if defined(EXTENSION_ENABLED) && defined(_HF_MANGLERESIZECALLBACK)
         UserMangleResizeCallback(hfuzz, fuzzer->dynamicFile, &fuzzer->dynamicFileSz);
 #else
         mangle_Resize(hfuzz, fuzzer->dynamicFile, &fuzzer->dynamicFileSz);
-#endif                          /* defined(_HF_MANGLERESIZECALLBACK) */
-#ifdef _HF_MANGLECALLBACK
+#endif
+#if defined(EXTENSION_ENABLED) && defined(_HF_MANGLECALLBACK)
         UserMangleCallback(hfuzz, fuzzer->dynamicFile, fuzzer->dynamicFileSz);
 #else
         mangle_mangleContent(hfuzz, fuzzer->dynamicFile, fuzzer->dynamicFileSz);
-#endif                          /* defined(_HF_MANGLECALLBACK) */
-#ifdef _HF_POSTMANGLECALLBACK
+#endif
+#if defined(EXTENSION_ENABLED) && defined(_HF_POSTMANGLECALLBACK)
         UserPostMangleCallback(hfuzz, fuzzer->dynamicFile, fuzzer->dynamicFileSz);
-#endif                          /* defined(_HF_POSTMANGLECALLBACK) */
-#endif                          /* defined(EXTENSION_ENABLED) */
+#endif
+
     }
 
     if (files_writeBufToFile
@@ -178,24 +175,21 @@ static bool fuzz_prepareFile(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, int rnd_ind
         LOGMSG(l_ERROR, "Couldn't read contents of '%s'", hfuzz->files[rnd_index]);
         return false;
     }
-#ifndef EXTENSION_ENABLED
-    mangle_Resize(hfuzz, fuzzer->dynamicFile, &fileSz);
-    mangle_mangleContent(hfuzz, fuzzer->dynamicFile, fileSz);
-#else
-#ifdef _HF_MANGLERESIZECALLBACK
+
+#if defined(EXTENSION_ENABLED) && defined(_HF_MANGLERESIZECALLBACK)
     UserMangleResizeCallback(hfuzz, fuzzer->dynamicFile, &fileSz);
 #else
     mangle_Resize(hfuzz, fuzzer->dynamicFile, &fileSz);
-#endif                          /* defined(_HF_MANGLERESIZECALLBACK) */
-#ifdef _HF_MANGLECALLBACK
+#endif
+#if defined(EXTENSION_ENABLED) && defined(_HF_MANGLECALLBACK)
     UserMangleCallback(hfuzz, fuzzer->dynamicFile, fileSz);
 #else
     mangle_mangleContent(hfuzz, fuzzer->dynamicFile, fileSz);
-#endif                          /* defined(_HF_MANGLECALLBACK) */
-#ifdef _HF_POSTMANGLECALLBACK
+#endif
+#if defined(EXTENSION_ENABLED) && defined(_HF_POSTMANGLECALLBACK)
     UserPostMangleCallback(hfuzz, fuzzer->dynamicFile, fileSz);
-#endif                          /* defined(_HF_POSTMANGLECALLBACK) */
-#endif                          /* defined(EXTENSION_ENABLED) */
+#endif
+
     if (files_writeBufToFile
         (fuzzer->fileName, fuzzer->dynamicFile, fileSz, O_WRONLY | O_CREAT | O_EXCL) == false) {
         LOGMSG(l_ERROR, "Couldn't write buffer to file '%s'", fuzzer->fileName);
@@ -223,12 +217,11 @@ static bool fuzz_prepareFileExternally(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, i
             unlink(fuzzer->fileName);
             return false;
         }
+
         // In case of external mangling only enable PostMangle callback
-#ifdef EXTENSION_ENABLED
-#ifdef _HF_POSTMANGLECALLBACK
+#if defined(EXTENSION_ENABLED) && defined(_HF_POSTMANGLECALLBACK)
         UserPostMangleCallback(hfuzz, fuzzer->dynamicFile, fileSz);
-#endif                          /* defined(_HF_POSTMANGLECALLBACK) */
-#endif                          /* defined(EXTENSION_ENABLED) */
+#endif
 
         if (files_writeToFd(dstfd, fuzzer->dynamicFile, fileSz) == false) {
             close(dstfd);
