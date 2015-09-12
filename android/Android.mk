@@ -133,4 +133,8 @@ ifdef EXTENSION
   LOCAL_CFLAGS += -DEXTENSION_ENABLED
 endif
 
+ifeq ($(APP_OPTIM),debug)
+  LOCAL_CFLAGS += -DDEBUG
+endif
+
 include $(BUILD_EXECUTABLE)

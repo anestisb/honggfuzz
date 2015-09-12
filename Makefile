@@ -112,7 +112,7 @@ INTERCEPTOR_SRCS = $(wildcard interceptor/*.c)
 INTERCEPTOR_LIBS = $(INTERCEPTOR_SRCS:.c=.so)
 
 ifeq ($(DEBUG),true)
-	CFLAGS += -g -ggdb
+	CFLAGS += -g -ggdb -DDEBUG
 endif
 
 # Control Android builds
