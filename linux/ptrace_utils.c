@@ -737,6 +737,17 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
 #endif
 
     arch_ptraceGenerateReport(pid, fuzzer, funcs, funcCnt, &si, instr, newname);
+
+#if defined(DEBUG)
+    char *lastDot = strrchr(newname, '.');
+    int baseNameLen = lastDot - newname;
+    char mapsFile[PATH_MAX] = { 0 };
+    snprintf(mapsFile, PATH_MAX, "%s/%.*s.maps", hfuzz->workDir, baseNameLen, newname);
+
+    if (files_procMapsToFile(pid, mapsFile) == false) {
+        LOGMSG(l_ERROR, "Failed to write maps file (pid=%d", pid);
+    }
+#endif
 }
 
 #define __WEVENT(status) ((status & 0xFF0000) >> 16)
