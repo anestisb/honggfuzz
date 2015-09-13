@@ -69,11 +69,11 @@ static int fuzz_sigReceived = 0;
 #ifdef EXTENSION_ENABLED
 // Definitions of extension interface functions
 typedef void (*MangleResizeCallback) (honggfuzz_t *, uint8_t *, size_t *);
-typedef void (*MangleCallback) (honggfuzz_t *, uint8_t *, size_t);
+typedef void (*MangleCallback) (honggfuzz_t *, uint8_t *, size_t, int);
 typedef void (*PostMangleCallback) (honggfuzz_t *, uint8_t *, size_t);
 
 extern void __hf_MangleResizeCallback(honggfuzz_t * hfuzz, uint8_t * buf, size_t * bufSz);
-extern void __hf_MangleCallback(honggfuzz_t * hfuzz, uint8_t * buf, size_t bufSz);
+extern void __hf_MangleCallback(honggfuzz_t * hfuzz, uint8_t * buf, size_t bufSz, int rnd_index);
 extern void __hf_PostMangleCallback(honggfuzz_t * hfuzz, uint8_t * buf, size_t bufSz);
 
 // Function pointer variables
@@ -147,7 +147,7 @@ static bool fuzz_prepareFileDynamically(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, 
         mangle_Resize(hfuzz, fuzzer->dynamicFile, &fuzzer->dynamicFileSz);
 #endif
 #if defined(EXTENSION_ENABLED) && defined(_HF_MANGLECALLBACK)
-        UserMangleCallback(hfuzz, fuzzer->dynamicFile, fuzzer->dynamicFileSz);
+        UserMangleCallback(hfuzz, fuzzer->dynamicFile, fuzzer->dynamicFileSz, rnd_index);
 #else
         mangle_mangleContent(hfuzz, fuzzer->dynamicFile, fuzzer->dynamicFileSz);
 #endif
@@ -175,14 +175,13 @@ static bool fuzz_prepareFile(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, int rnd_ind
         LOGMSG(l_ERROR, "Couldn't read contents of '%s'", hfuzz->files[rnd_index]);
         return false;
     }
-
 #if defined(EXTENSION_ENABLED) && defined(_HF_MANGLERESIZECALLBACK)
     UserMangleResizeCallback(hfuzz, fuzzer->dynamicFile, &fileSz);
 #else
     mangle_Resize(hfuzz, fuzzer->dynamicFile, &fileSz);
 #endif
 #if defined(EXTENSION_ENABLED) && defined(_HF_MANGLECALLBACK)
-    UserMangleCallback(hfuzz, fuzzer->dynamicFile, fileSz);
+    UserMangleCallback(hfuzz, fuzzer->dynamicFile, fileSz, rnd_index);
 #else
     mangle_mangleContent(hfuzz, fuzzer->dynamicFile, fileSz);
 #endif
@@ -217,7 +216,6 @@ static bool fuzz_prepareFileExternally(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, i
             unlink(fuzzer->fileName);
             return false;
         }
-
         // In case of external mangling only enable PostMangle callback
 #if defined(EXTENSION_ENABLED) && defined(_HF_POSTMANGLECALLBACK)
         UserPostMangleCallback(hfuzz, fuzzer->dynamicFile, fileSz);

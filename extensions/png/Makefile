@@ -1,5 +1,8 @@
 # Interface callback flags. Enable for each implemented method
 #
+# _HF_FILESPREPARSECALLBACK
+#   Pre-parse input corpus
+#
 # _HF_MANGLERESIZECALLBACK: 
 #   Input file resize routine (for dynamic size mangling)
 #

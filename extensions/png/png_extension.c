@@ -158,6 +158,12 @@ static void repairPngCRC(uint8_t * buf, off_t fileSz)
  * EXTENSION_CFLAGS
  */
 
+/* -D_HF_FILESPREPARSECALLBACK*/
+//bool __hf_FilesPreParseCallback(honggfuzz_t * hfuzz)
+//{
+//
+//}
+
 /* -D_HF_MANGLERESIZECALLBACK */
 //void __hf_MangleResizeCallback(honggfuzz_t * hfuzz, uint8_t * buf, size_t * bufSz)
 //{
@@ -165,7 +171,7 @@ static void repairPngCRC(uint8_t * buf, off_t fileSz)
 //}
 
 /* -D_HF_MANGLECALLBACK */
-//void __hf_MangleCallback(honggfuzz_t * hfuzz, uint8_t * buf, size_t bufSz)
+//void __hf_MangleCallback(honggfuzz_t * hfuzz, uint8_t * buf, size_t bufSz, int rnd_index)
 //{
 //
 //}

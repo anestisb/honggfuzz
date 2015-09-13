@@ -41,6 +41,16 @@
 #define ANSI_BOLD "\033[1m"
 #define ANSI_CLEAR "\033[0m"
 
+#ifdef EXTENSION_ENABLED
+// Definitions of extension interface functions
+typedef bool(*FilesPreParseCallback) (honggfuzz_t *);
+extern bool __hf_FilesPreParseCallback(honggfuzz_t * hfuzz);
+
+#ifdef _HF_FILESPREPARSECALLBACK
+static FilesPreParseCallback UserFilesPreParseCallback = &__hf_FilesPreParseCallback;
+#endif                          /* defined(_HF_FILESPREPARSECALLBACK) */
+#endif                          /* defined(EXTENSION_ENABLED) */
+
 static bool checkFor_FILE_PLACEHOLDER(char **args)
 {
     for (int x = 0; args[x]; x++) {
@@ -181,6 +191,9 @@ int main(int argc, char **argv)
 
         .disableRandomization = true,
         .msanReportUMRS = false,
+#if defined(EXTENSION_ENABLED)
+        .userData = NULL,
+#endif
     };
 
     if (argc < 2) {
@@ -356,6 +369,12 @@ int main(int argc, char **argv)
         LOGMSG(l_FATAL, "Couldn't load input files");
         exit(EXIT_FAILURE);
     }
+#if defined(EXTENSION_ENABLED) && defined(_HF_FILESPREPARSECALLBACK)
+    if (!UserFilesPreParseCallback(&hfuzz)) {
+        LOGMSG(l_FATAL, "Couldn't pre-parse input files");
+        exit(EXIT_FAILURE);
+    }
+#endif
 
     if (hfuzz.dictionaryFile && (files_parseDictionary(&hfuzz) == false)) {
         LOGMSG(l_FATAL, "Couldn't parse dictionary file ('%s')", hfuzz.dictionaryFile);

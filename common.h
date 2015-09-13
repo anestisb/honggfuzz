@@ -109,6 +109,10 @@ typedef struct {
     pthread_mutex_t dynamicFile_mutex;
     bool disableRandomization;
     bool msanReportUMRS;
+
+#if defined(EXTENSION_ENABLED)
+    void **userData;
+#endif
 } honggfuzz_t;
 
 typedef struct fuzzer_t {

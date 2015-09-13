@@ -4,6 +4,9 @@
 
 #include <string.h>
 #include <zlib.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 
 #define DEX_MAGIC  "dex"
 #define ODEX_MAGIC "dey"
@@ -44,6 +47,24 @@ typedef struct __attribute__ ((packed)) {
     uint32_t dataOff;
 } dexHeader;
 
+/*
+ * Verify if valid DEX file magic number
+ */
+static inline bool isValidDexMagic(const dexHeader *pDexHeader)
+{
+    /* Validate DEX magic number */
+    if (((memcmp(pDexHeader->magic.dex,  DEX_MAGIC, 3) != 0)    && // Check if DEX
+         (memcmp(pDexHeader->magic.dex, ODEX_MAGIC, 3) != 0))   || // Check if ODEX
+        (memcmp(pDexHeader->magic.nl,   "\n",      1) != 0)     || // Check for newline
+        ((memcmp(pDexHeader->magic.ver, API_LE_13, 3) != 0) &&     // Check for API SDK <= 13
+         (memcmp(pDexHeader->magic.ver, API_GE_14, 3) != 0))    || // Check for API SDK >= 14
+        (memcmp(pDexHeader->magic.zero, "\0",      1) != 0)) {     // Check for zero
+        
+        return false;
+    }
+    else return true;
+}
+
 /* Repair DEX CRC */
 static void repairDexCRC(uint8_t * buf, off_t fileSz)
 {
@@ -55,12 +76,108 @@ static void repairDexCRC(uint8_t * buf, off_t fileSz)
     LOGMSG(l_DEBUG, "CRC repaired (0x%08X)", adler_checksum);
 }
 
+static uint8_t* mapFileToRead(char *fileName, off_t *fileSz, int *fd)
+{
+    if ((*fd = open(fileName, O_RDONLY)) == -1) {
+        LOGMSG_P(l_ERROR, "Couldn't open() '%s' file in R/O mode", fileName);
+        return NULL;
+    }
+
+    struct stat st;
+    if (fstat(*fd, &st) == -1) {
+        LOGMSG_P(l_ERROR, "Couldn't stat() the '%s' file", fileName);
+        close(*fd);
+        return NULL;
+    }
+
+    uint8_t *buf;
+    if ((buf = mmap(NULL, st.st_size, PROT_READ | PROT_WRITE, MAP_PRIVATE, *fd, 0)) == MAP_FAILED) {
+        LOGMSG_P(l_ERROR, "Couldn't mmap() the '%s' file", fileName);
+        close(*fd);
+        return NULL;
+    }
+
+    *fileSz = st.st_size;
+    return buf;
+}
+
+/*
+ * Runtime data structure
+ */
+typedef struct __attribute__ ((packed)) {
+    uint32_t crc;
+    uint32_t size;
+    uint32_t dataSize;
+} fileInfo;
+
 /* 
  * Interface functions:
  * 
  * Remember to export defines of implemented callbacks in xxx_Makefile
  * EXTENSION_CFLAGS
  */
+
+/* -D_HF_FILESPREPARSECALLBACK*/
+
+/*
+ * PoC method to extract file metadata and store them runtime structure to be
+ * available for fuzzing engine at runtime
+ */
+bool __hf_FilesPreParseCallback(honggfuzz_t * hfuzz)
+{
+    LOGMSG(l_DEBUG, "Pre-parsing input corpus");
+
+    hfuzz->userData = malloc(hfuzz->fileCnt * sizeof(fileInfo*));
+    if (!hfuzz->userData) {
+        LOGMSG_P(l_ERROR, "malloc() failed");
+        return false;
+    }
+
+    for (int i = 0; i < hfuzz->fileCnt; i++) {
+        off_t fileSz = -1;
+        int srcFd = -1;
+        uint8_t *buf = NULL;
+        bool hasError = false;
+
+        buf = mapFileToRead(hfuzz->files[i], &fileSz, &srcFd);
+        if (buf == NULL) {
+            LOGMSG(l_ERROR, "'%s' open and map in R/O mode failed", hfuzz->files[i]);
+            hasError = true;
+            goto bail;
+        }
+
+        const dexHeader *pDexHeader = (const dexHeader*)buf;
+
+        /* Validate DEX magic number */
+        if (!isValidDexMagic(pDexHeader)) {
+            LOGMSG(l_ERROR, "Invalid DEX magic number");
+            hasError = true;
+            goto bail;
+        }
+
+        hfuzz->userData[i] = malloc(sizeof(fileInfo));
+        fileInfo *pFileInfo = (fileInfo*)hfuzz->userData[i];
+
+        pFileInfo->crc = pDexHeader->checksum;
+        pFileInfo->size = pDexHeader->fileSize;
+        pFileInfo->dataSize = pDexHeader->dataSize;
+
+bail:
+        if (!buf) {
+            munmap(buf, fileSz);
+            buf = NULL;
+            close(srcFd);
+            srcFd = -1;
+        }
+
+        /* Check for errors in current file */
+        if (hasError) {
+            LOGMSG(l_ERROR, "Failed to prepare %s", hfuzz->files[i]);
+            return false;
+        }
+    }
+    return true;
+}
 
 /* -D_HF_MANGLERESIZECALLBACK */
 //void __hf_MangleResizeCallback(honggfuzz_t * hfuzz, uint8_t * buf, size_t * bufSz)
@@ -69,14 +186,22 @@ static void repairDexCRC(uint8_t * buf, off_t fileSz)
 //}
 
 /* -D_HF_MANGLECALLBACK */
-void __hf_MangleCallback(honggfuzz_t * hfuzz, uint8_t * buf, size_t bufSz)
+void __hf_MangleCallback(honggfuzz_t * hfuzz, uint8_t * buf, size_t bufSz, int rnd_index)
 {
     // No mangling, just return
     if (hfuzz->flipRate == 0.0L) {
         return;
     }
+
+    // If data section > 50k, double the rate
+    double dexFlipRate = hfuzz->flipRate;
+    fileInfo *pFileInfo = (fileInfo*)hfuzz->userData[rnd_index];
+    if (pFileInfo->dataSize > 51200) {
+        dexFlipRate = 2 * dexFlipRate;
+    }
+
     // Ensure at least 1 change rate > 0.0
-    uint64_t changesCnt = bufSz * hfuzz->flipRate;
+    uint64_t changesCnt = bufSz * dexFlipRate;
     if (changesCnt == 0ULL) {
         changesCnt = 1;
     }
