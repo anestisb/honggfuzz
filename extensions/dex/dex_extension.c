@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <stdlib.h>
 
 #define DEX_MAGIC  "dex"
 #define ODEX_MAGIC "dey"

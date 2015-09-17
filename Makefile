@@ -102,7 +102,7 @@ ifdef EXTENSION
 	include extensions/$(EXTENSION)/Makefile
 	CFLAGS += $(EXTENSION_CFLAGS)
 	LDFLAGS += $(EXTENSION_LDFLAGS)
-	SRCS += $(wildcard extensions/$(EXTENSION)/*.c)
+	SRCS += $(EXTENSION_SRCFILES)
 	CFLAGS += -DEXTENSION_ENABLED
 endif
 
