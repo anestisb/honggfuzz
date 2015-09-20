@@ -487,7 +487,7 @@ void fuzz_main(honggfuzz_t * hfuzz)
         if (__sync_fetch_and_add(&hfuzz->threadsFinished, 0UL) >= hfuzz->threadsMax) {
             break;
         }
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) && defined(_HF_ARCH_LINUX)
 #define sysBat "/sys/class/power_supply/battery/capacity"
 #define maxLow 10L
 #define iterCheck 500UL

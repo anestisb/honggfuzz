@@ -409,7 +409,9 @@ bool files_copyFile(const char *source, const char *destination, bool * dstExist
     return true;
 }
 
-#if defined(_HF_ARCH_LINUX) && defined(DEBUG)
+#if defined(_HF_ARCH_LINUX)
+#if defined(DEBUG)
+
 #define PROC_MAP_SZ   2176
 #define PROC_MAP_SZ_  2175
 #define XSTR(A)       STRI(A)
@@ -460,7 +462,7 @@ bool files_procMapsToFile(pid_t pid, const char *fileName)
 
     return true;
 }
-#endif                          /* defined(_HF_ARCH_LINUX) */
+#endif                          /* defined(DEBUG) */
 
 extern int files_readSysFS(const char *source, char *buf, size_t bufSz)
 {
@@ -488,3 +490,4 @@ extern int files_readSysFS(const char *source, char *buf, size_t bufSz)
     close(inFD);
     return count;
 }
+#endif                          /* defined(_HF_ARCH_LINUX) */
