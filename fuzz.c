@@ -452,9 +452,8 @@ void fuzz_main(honggfuzz_t * hfuzz)
             char batStatus[128] = { 0 };
             if (files_readSysFS(sysBat, batStatus, sizeof(batStatus)) <= 0) {
                 LOGMSG(l_ERROR, "Couldn't read battery status");
-            }
-            else {
-                long batLevel = atol((char*)batStatus);
+            } else {
+                long batLevel = atol(batStatus);
                 if (batLevel < maxLow) {
                     LOGMSG(l_INFO, "Stopping due to battery level below %d\%%", maxLow);
                     break;
