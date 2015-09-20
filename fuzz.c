@@ -444,7 +444,6 @@ void fuzz_main(honggfuzz_t * hfuzz)
 #define iterCheck 500UL
 
         // Check battery status every 'iterCheck' iterations
-        LOGMSG(l_INFO, "mCnt:%ld", __sync_fetch_and_add(&hfuzz->mutationsCnt, 0UL));
         if ((__sync_fetch_and_add(&hfuzz->mutationsCnt, 0UL) - curMutationsCnt) > iterCheck) {
             curMutationsCnt = __sync_fetch_and_add(&hfuzz->mutationsCnt, 0UL);
 
