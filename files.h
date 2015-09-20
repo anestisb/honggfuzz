@@ -53,4 +53,6 @@ extern bool files_copyFile(const char *source, const char *destination, bool * d
 bool files_procMapsToFile(pid_t pid, const char *fileName);
 #endif
 
+extern int files_readSysFS(const char *source, char *buf, size_t bufSz);
+
 #endif

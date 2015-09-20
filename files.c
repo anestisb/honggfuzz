@@ -461,3 +461,30 @@ bool files_procMapsToFile(pid_t pid, const char *fileName)
     return true;
 }
 #endif                          /* defined(_HF_ARCH_LINUX) */
+
+extern int files_readSysFS(const char *source, char *buf, size_t bufSz)
+{
+    char *cp = NULL;
+    int inFD = open(source, O_RDONLY, 0);
+    if (inFD == -1) {
+        LOGMSG_P(l_DEBUG, "Couldn't open '%s' source", source);
+        return -1;
+    }
+
+    ssize_t count = 0;
+    do {
+        count = read(inFD, buf, bufSz);
+    } while (count == -1 && errno == EINTR);
+
+    if (count > 0)
+        cp = (char *)strrchr(buf, '\n');
+
+    if (cp)
+        *cp = '\0';
+
+    else
+        buf[0] = '\0';
+
+    close(inFD);
+    return count;
+}

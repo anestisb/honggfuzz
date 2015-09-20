@@ -472,6 +472,11 @@ void fuzz_main(honggfuzz_t * hfuzz)
         fuzz_runThread(hfuzz, fuzz_threadNew);
     }
 
+#if defined(__ANDROID__)
+    // Used only by Android to apply battery status checks
+    size_t curMutationsCnt = 0;
+#endif
+
     for (;;) {
         if (hfuzz->useScreen) {
             display_display(hfuzz);
@@ -482,6 +487,29 @@ void fuzz_main(honggfuzz_t * hfuzz)
         if (__sync_fetch_and_add(&hfuzz->threadsFinished, 0UL) >= hfuzz->threadsMax) {
             break;
         }
+#if defined(__ANDROID__)
+#define sysBat "/sys/class/power_supply/battery/capacity"
+#define maxLow 10L
+#define iterCheck 500UL
+
+        // Check battery status every 'iterCheck' iterations
+        LOGMSG(l_INFO, "mCnt:%ld", __sync_fetch_and_add(&hfuzz->mutationsCnt, 0UL));
+        if ((__sync_fetch_and_add(&hfuzz->mutationsCnt, 0UL) - curMutationsCnt) > iterCheck) {
+            curMutationsCnt = __sync_fetch_and_add(&hfuzz->mutationsCnt, 0UL);
+
+            // Read status from sysfs
+            char batStatus[128] = { 0 };
+            if (files_readSysFS(sysBat, batStatus, sizeof(batStatus)) <= 0) {
+                LOGMSG(l_ERROR, "Couldn't read battery status");
+            } else {
+                long batLevel = atol(batStatus);
+                if (batLevel < maxLow) {
+                    LOGMSG(l_INFO, "Stopping due to battery level below %d\%%", maxLow);
+                    break;
+                }
+            }
+        }
+#endif
         pause();
     }
 
