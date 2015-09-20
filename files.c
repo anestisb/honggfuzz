@@ -409,6 +409,7 @@ bool files_copyFile(const char *source, const char *destination, bool * dstExist
     return true;
 }
 
+#if defined(_HF_ARCH_LINUX)
 extern int files_readSysFS(const char *source, char *buf, size_t bufSz)
 {
     char *cp = NULL;
@@ -435,3 +436,4 @@ extern int files_readSysFS(const char *source, char *buf, size_t bufSz)
     close(inFD);
     return count;
 }
+#endif /* defined(_HF_ARCH_LINUX) */

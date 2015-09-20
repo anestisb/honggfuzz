@@ -49,6 +49,8 @@ extern bool files_parseDictionary(honggfuzz_t * hfuzz);
 
 extern bool files_copyFile(const char *source, const char *destination, bool * dstExists);
 
+#if defined(_HF_ARCH_LINUX)
 extern int files_readSysFS(const char *source, char *buf, size_t bufSz);
+#endif
 
 #endif
