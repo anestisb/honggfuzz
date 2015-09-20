@@ -408,3 +408,26 @@ bool files_copyFile(const char *source, const char *destination, bool * dstExist
     close(outFD);
     return true;
 }
+
+extern int files_readSysFS(const char *source, char * buf, size_t bufSz)
+{
+    char *cp = NULL;
+    int inFD = open(source, O_RDONLY, 0);
+    if (inFD == -1) {
+        LOGMSG_P(l_DEBUG, "Couldn't open '%s' source", source);
+        return -1;
+    }
+
+    ssize_t count = TEMP_FAILURE_RETRY(read(inFD, buf, bufSz));
+    if (count > 0)
+        cp = (char *)memrchr(buf, '\n', count);
+
+    if (cp)
+        *cp = '\0';
+    
+    else
+        buf[0] = '\0';
+
+    close(inFD);
+    return count;
+}
