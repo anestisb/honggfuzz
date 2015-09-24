@@ -127,10 +127,9 @@ endif
 # Check if an extensions has been enabled
 ifdef EXTENSION
   include extensions/$(EXTENSION)/Makefile
-  CFLAGS += $(EXTENSION_CFLAGS)
+  CFLAGS += $(EXTENSION_CFLAGS) -DEXTENSION_ENABLED
   LDFLAGS += $(EXTENSION_LDFLAGS)
   SRCS += $(EXTENSION_SRCFILES)
-  CFLAGS += -DEXTENSION_ENABLED
 endif
 
 OBJS := $(SRCS:.c=.o)
