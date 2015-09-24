@@ -839,7 +839,7 @@ void arch_ptraceAnalyze(honggfuzz_t * hfuzz, int status, pid_t pid, fuzzer_t * f
             arch_ptraceSaveData(hfuzz, pid, fuzzer);
 
             /* 
-             * An kind of ugly (although necessary) hack due to custom signal handlers
+             * A kind of ugly (although necessary) hack due to custom signal handlers
              * in Android from debuggerd. If we pass one of the monitored signals, 
              * we'll end-up running the processing routine twice. A cost that we 
              * don't want to pay.
@@ -920,9 +920,9 @@ static bool arch_listThreads(int tasks[], size_t thrSz, int pid)
     return true;
 }
 
+#define MAX_THREAD_IN_TASK 4096
 bool arch_ptraceAttach(pid_t pid)
 {
-#define MAX_THREAD_IN_TASK 4096
     int tasks[MAX_THREAD_IN_TASK + 1] = { 0 };
     if (!arch_listThreads(tasks, MAX_THREAD_IN_TASK, pid)) {
         LOGMSG(l_ERROR, "Couldn't read thread list for pid '%d'", pid);
@@ -940,7 +940,24 @@ bool arch_ptraceAttach(pid_t pid)
         LOGMSG(l_DEBUG, "Successfully attached to pid/tid: %d", tasks[i]);
     }
     for (int i = 0; i < MAX_THREAD_IN_TASK && tasks[i]; i++) {
-        ptrace(PT_CONTINUE, tasks[i], NULL, NULL);
+        ptrace(PTRACE_INTERRUPT, tasks[i], NULL, NULL);
+        ptrace(PTRACE_CONT, tasks[i], NULL, NULL);
     }
     return true;
+}
+
+void arch_ptraceDetach(pid_t pid)
+{
+    int tasks[MAX_THREAD_IN_TASK + 1] = { 0 };
+    if (!arch_listThreads(tasks, MAX_THREAD_IN_TASK, pid)) {
+        LOGMSG(l_ERROR, "Couldn't read thread list for pid '%d'", pid);
+        return;
+    }
+
+    for (int i = 0; i < MAX_THREAD_IN_TASK && tasks[i]; i++) {
+        ptrace(PTRACE_INTERRUPT, tasks[i], NULL, NULL);
+        int status;
+        while (wait4(tasks[i], &status, __WALL, NULL) != pid) ;
+        ptrace(PTRACE_DETACH, tasks[i], NULL, NULL);
+    }
 }

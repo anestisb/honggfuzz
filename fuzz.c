@@ -66,6 +66,8 @@ pid_t honggfuzz_aarch64_fork(void)
 
 static int fuzz_sigReceived = 0;
 
+static pthread_t fuzz_mainThread;
+
 static void fuzz_sigHandler(int sig)
 {
     /* We should not terminate upon SIGALRM delivery */
@@ -311,7 +313,7 @@ static void fuzz_fuzzLoop(honggfuzz_t * hfuzz)
         if (diff0 <= 0 && diff1 <= 0 && diff2 <= 0 && diff3 <= 0 && diff4 <= 0) {
 
             LOGMSG(l_INFO,
-                   "New BEST feedback: File Size (New/Old): %zu/%zu', Perf feedback (Curr, High): %"
+                   "New: (Size New,Old): %zu,%zu, Perf (Cur,New): %"
                    PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64 ",%" PRId64 "/%" PRId64
                    "/%" PRId64 "/%" PRId64 "/%" PRId64, fuzzer.dynamicFileSz,
                    hfuzz->dynamicFileBestSz, hfuzz->hwCnts.cpuInstrCnt, hfuzz->hwCnts.cpuBranchCnt,
@@ -354,7 +356,7 @@ static void *fuzz_threadNew(void *arg)
             && hfuzz->mutationsMax) {
             __sync_fetch_and_add(&hfuzz->threadsFinished, 1UL);
             // Wake-up the main process
-            kill(getpid(), SIGALRM);
+            pthread_kill(fuzz_mainThread, SIGALRM);
             return NULL;
         }
 
@@ -394,6 +396,8 @@ bool fuzz_setupTimer(void)
 
 void fuzz_main(honggfuzz_t * hfuzz)
 {
+    fuzz_mainThread = pthread_self();
+
     struct sigaction sa = {
         .sa_handler = fuzz_sigHandler,
         .sa_flags = 0,
@@ -409,7 +413,7 @@ void fuzz_main(honggfuzz_t * hfuzz)
         LOGMSG_P(l_FATAL, "sigaction(SIGQUIT) failed");
     }
     if (sigaction(SIGALRM, &sa, NULL) == -1) {
-        LOGMSG_P(l_FATAL, "sigaction(SIGQUIT) failed");
+        LOGMSG_P(l_FATAL, "sigaction(SIGALRM) failed");
     }
     if (fuzz_setupTimer() == false) {
         LOGMSG(l_FATAL, "fuzz_setupTimer()");
