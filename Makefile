@@ -121,7 +121,7 @@ CFLAGS += $(COMMON_CFLAGS) $(ARCH_CFLAGS) -D_HF_ARCH_${ARCH}
 LDFLAGS += $(COMMON_LDFLAGS) $(ARCH_LDFLAGS)
 
 ifeq ($(DEBUG),true)
-    CFLAGS += -g -ggdb
+    CFLAGS += -g -ggdb -DDEBUG
 endif
 
 # Check if an extensions has been enabled
