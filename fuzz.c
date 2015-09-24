@@ -66,6 +66,8 @@ pid_t honggfuzz_aarch64_fork(void)
 
 static int fuzz_sigReceived = 0;
 
+static pthread_t fuzz_mainThread;
+
 #ifdef EXTENSION_ENABLED
 // Definitions of extension interface functions
 typedef void (*MangleResizeCallback) (honggfuzz_t *, uint8_t *, size_t *);
@@ -403,7 +405,7 @@ static void *fuzz_threadNew(void *arg)
             && hfuzz->mutationsMax) {
             __sync_fetch_and_add(&hfuzz->threadsFinished, 1UL);
             // Wake-up the main process
-            kill(getpid(), SIGALRM);
+            pthread_kill(fuzz_mainThread, SIGALRM);
             return NULL;
         }
 
@@ -443,6 +445,8 @@ bool fuzz_setupTimer(void)
 
 void fuzz_main(honggfuzz_t * hfuzz)
 {
+    fuzz_mainThread = pthread_self();
+
     struct sigaction sa = {
         .sa_handler = fuzz_sigHandler,
         .sa_flags = 0,
