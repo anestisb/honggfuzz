@@ -57,6 +57,6 @@ bool files_procMapsToFile(pid_t pid, const char *fileName);
 extern int files_readSysFS(const char *source, char *buf, size_t bufSz);
 #endif  /* defined(_HF_ARCH_LINUX) */
 
-bool files_parseBlacklist(honggfuzz_t * hfuzz);
+extern bool files_parseBlacklist(honggfuzz_t * hfuzz);
 
 #endif
