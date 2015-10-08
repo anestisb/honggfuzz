@@ -53,17 +53,6 @@
 #include "report.h"
 #include "util.h"
 
-#if defined(__ANDROID__) && !defined(__NR_fork)
-#include <sys/syscall.h>
-
-pid_t honggfuzz_aarch64_fork(void)
-{
-    return syscall(__NR_clone, SIGCHLD, 0, 0, 0);
-}
-
-#define fork honggfuzz_aarch64_fork
-#endif
-
 static int fuzz_sigReceived = 0;
 
 static pthread_t fuzz_mainThread;
@@ -263,14 +252,7 @@ static void fuzz_fuzzLoop(honggfuzz_t * hfuzz)
         }
     }
 
-#if defined(_HF_ARCH_LINUX) && defined(__NR_fork)
-#include <unistd.h>
-#include <sys/syscall.h>
-    fuzzer.pid = syscall(__NR_fork);
-#else                           /* defined(_HF_ARCH_LINUX) */
-    fuzzer.pid = fork();
-#endif                          /* defined(_HF_ARCH_LINUX) */
-
+    fuzzer.pid = arch_fork(hfuzz);
     if (fuzzer.pid == -1) {
         LOGMSG_P(l_FATAL, "Couldn't fork");
         exit(EXIT_FAILURE);
@@ -441,7 +423,8 @@ void fuzz_main(honggfuzz_t * hfuzz)
     }
 
     if (fuzz_sigReceived > 0) {
-        LOGMSG(l_INFO, "Signal %d received, terminating", fuzz_sigReceived);
+        LOGMSG(l_INFO, "Signal %d (%s) received, terminating", fuzz_sigReceived,
+               strsignal(fuzz_sigReceived));
     }
 
     free(hfuzz->files);
