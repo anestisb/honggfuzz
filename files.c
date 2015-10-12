@@ -458,8 +458,9 @@ bool files_procMapsToFile(pid_t pid, const char *fileName)
     return true;
 }
 #endif                          /* defined(DEBUG_BUILD) */
+#endif                          /* defined(_HF_ARCH_LINUX) */
 
-extern int files_readSysFS(const char *source, char *buf, size_t bufSz)
+int files_readSysFS(const char *source, char *buf, size_t bufSz)
 {
     char *cp = NULL;
     int inFD = open(source, O_RDONLY, 0);
@@ -485,7 +486,6 @@ extern int files_readSysFS(const char *source, char *buf, size_t bufSz)
     close(inFD);
     return count;
 }
-#endif                          /* defined(_HF_ARCH_LINUX) */
 
 bool files_parseBlacklist(honggfuzz_t * hfuzz)
 {
