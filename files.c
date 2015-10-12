@@ -452,7 +452,7 @@ bool files_parseBlacklist(honggfuzz_t * hfuzz)
     return true;
 }
 
-#if defined(_HF_ARCH_LINUX) && defined(DEBUG)
+#if defined(_HF_ARCH_LINUX) && defined(DEBUG_BUILD)
 #define PROC_MAP_SZ   2176
 #define PROC_MAP_SZ_  2175
 #define XSTR(A)       STRI(A)
@@ -467,14 +467,14 @@ bool files_procMapsToFile(pid_t pid, const char *fileName)
 
     int outFD = open(fileName, dstOpenFlags, dstFilePerms);
     if (outFD == -1) {
-        LOGMSG_P(l_ERROR, "Couldn't open '%s' destination", fileName);
+        PLOG_E("Couldn't open '%s' destination", fileName);
         return false;
     }
 
     snprintf(fMaps, PATH_MAX, "/proc/%d/maps", pid);
 
     if ((f = fopen(fMaps, "rb")) == NULL) {
-        LOGMSG_P(l_ERROR, "Couldn't open '%s' - R/O mode", fMaps);
+        PLOG_E("Couldn't open '%s' - R/O mode", fMaps);
         close(outFD);
         return false;
     }
