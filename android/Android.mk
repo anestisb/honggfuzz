@@ -133,7 +133,7 @@ ifdef EXTENSION
 endif
 
 ifeq ($(APP_OPTIM),debug)
-  LOCAL_CFLAGS += -DDEBUG
+  LOCAL_CFLAGS += -DDEBUG_BUILD
 endif
 
 include $(BUILD_EXECUTABLE)

@@ -405,7 +405,7 @@ bool files_copyFile(const char *source, const char *destination, bool * dstExist
 }
 
 #if defined(_HF_ARCH_LINUX)
-#if defined(DEBUG)
+#if defined(DEBUG_BUILD)
 
 #define PROC_MAP_SZ   2176
 #define PROC_MAP_SZ_  2175
@@ -421,14 +421,14 @@ bool files_procMapsToFile(pid_t pid, const char *fileName)
 
     int outFD = open(fileName, dstOpenFlags, dstFilePerms);
     if (outFD == -1) {
-        LOGMSG_P(l_ERROR, "Couldn't open '%s' destination", fileName);
+        PLOG_E("Couldn't open '%s' destination", fileName);
         return false;
     }
 
     snprintf(fMaps, PATH_MAX, "/proc/%d/maps", pid);
 
     if ((f = fopen(fMaps, "rb")) == NULL) {
-        LOGMSG_P(l_ERROR, "Couldn't open '%s' - R/O mode", fMaps);
+        PLOG_E("Couldn't open '%s' - R/O mode", fMaps);
         close(outFD);
         return false;
     }
@@ -457,14 +457,14 @@ bool files_procMapsToFile(pid_t pid, const char *fileName)
 
     return true;
 }
-#endif                          /* defined(DEBUG) */
+#endif                          /* defined(DEBUG_BUILD) */
 
 extern int files_readSysFS(const char *source, char *buf, size_t bufSz)
 {
     char *cp = NULL;
     int inFD = open(source, O_RDONLY, 0);
     if (inFD == -1) {
-        LOGMSG_P(l_DEBUG, "Couldn't open '%s' source", source);
+        PLOG_D("Couldn't open '%s' source", source);
         return -1;
     }
 

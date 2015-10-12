@@ -135,7 +135,7 @@ static void repairPngCRC(uint8_t * buf, off_t fileSz)
 
         // Overflow check
         if (crcBufLen > LONG_MAX || fileSz - curOff < (long)crcBufLen) {
-            LOGMSG(l_DEBUG, "OOB chunk size. Skip CRC repair.");
+            LOG_D("OOB chunk size. Skip CRC repair.");
             return;
         }
 

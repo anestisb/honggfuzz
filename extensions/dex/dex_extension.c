@@ -74,26 +74,26 @@ static void repairDexCRC(uint8_t * buf, off_t fileSz)
     const uint8_t *non_sum_ptr = (const uint8_t *)buf + non_sum;
     adler_checksum = adler32(adler_checksum, non_sum_ptr, fileSz - non_sum);
     memcpy(buf + sizeof(dexMagic), &adler_checksum, sizeof(uint32_t));
-    LOGMSG(l_DEBUG, "CRC repaired (0x%08X)", adler_checksum);
+    LOG_D("CRC repaired (0x%08X)", adler_checksum);
 }
 
 static uint8_t* mapFileToRead(char *fileName, off_t *fileSz, int *fd)
 {
     if ((*fd = open(fileName, O_RDONLY)) == -1) {
-        LOGMSG_P(l_ERROR, "Couldn't open() '%s' file in R/O mode", fileName);
+        PLOG_E("Couldn't open() '%s' file in R/O mode", fileName);
         return NULL;
     }
 
     struct stat st;
     if (fstat(*fd, &st) == -1) {
-        LOGMSG_P(l_ERROR, "Couldn't stat() the '%s' file", fileName);
+        PLOG_E("Couldn't stat() the '%s' file", fileName);
         close(*fd);
         return NULL;
     }
 
     uint8_t *buf;
     if ((buf = mmap(NULL, st.st_size, PROT_READ | PROT_WRITE, MAP_PRIVATE, *fd, 0)) == MAP_FAILED) {
-        LOGMSG_P(l_ERROR, "Couldn't mmap() the '%s' file", fileName);
+        PLOG_E("Couldn't mmap() the '%s' file", fileName);
         close(*fd);
         return NULL;
     }
@@ -126,11 +126,11 @@ typedef struct __attribute__ ((packed)) {
  */
 bool __hf_FilesPreParseCallback(honggfuzz_t * hfuzz)
 {
-    LOGMSG(l_DEBUG, "Pre-parsing input corpus");
+    LOG_D("Pre-parsing input corpus");
 
     hfuzz->userData = malloc(hfuzz->fileCnt * sizeof(fileInfo*));
     if (!hfuzz->userData) {
-        LOGMSG_P(l_ERROR, "malloc() failed");
+        PLOG_E("malloc() failed");
         return false;
     }
 
@@ -142,7 +142,7 @@ bool __hf_FilesPreParseCallback(honggfuzz_t * hfuzz)
 
         buf = mapFileToRead(hfuzz->files[i], &fileSz, &srcFd);
         if (buf == NULL) {
-            LOGMSG(l_ERROR, "'%s' open and map in R/O mode failed", hfuzz->files[i]);
+            LOG_E("'%s' open and map in R/O mode failed", hfuzz->files[i]);
             hasError = true;
             goto bail;
         }
@@ -151,7 +151,7 @@ bool __hf_FilesPreParseCallback(honggfuzz_t * hfuzz)
 
         /* Validate DEX magic number */
         if (!isValidDexMagic(pDexHeader)) {
-            LOGMSG(l_ERROR, "Invalid DEX magic number");
+            LOG_E("Invalid DEX magic number");
             hasError = true;
             goto bail;
         }
@@ -173,7 +173,7 @@ bail:
 
         /* Check for errors in current file */
         if (hasError) {
-            LOGMSG(l_ERROR, "Failed to prepare %s", hfuzz->files[i]);
+            LOG_E("Failed to prepare %s", hfuzz->files[i]);
             return false;
         }
     }

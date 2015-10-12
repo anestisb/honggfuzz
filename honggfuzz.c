@@ -61,7 +61,7 @@ int main(int argc, char **argv)
     }
 #if defined(EXTENSION_ENABLED) && defined(_HF_FILESPREPARSECALLBACK)
     if (!UserFilesPreParseCallback(&hfuzz)) {
-        LOGMSG(l_FATAL, "Couldn't pre-parse input files");
+        LOG_F("Couldn't pre-parse input files");
         exit(EXIT_FAILURE);
     }
 #endif
