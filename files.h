@@ -52,10 +52,10 @@ extern bool files_copyFile(const char *source, const char *destination, bool * d
 #if defined(_HF_ARCH_LINUX)
 #if defined(DEBUG_BUILD)
 bool files_procMapsToFile(pid_t pid, const char *fileName);
-#endif  /* defined(DEBUG_BUILD) */
+#endif                          /* defined(DEBUG_BUILD) */
 
 extern int files_readSysFS(const char *source, char *buf, size_t bufSz);
-#endif  /* defined(_HF_ARCH_LINUX) */
+#endif                          /* defined(_HF_ARCH_LINUX) */
 
 extern bool files_parseBlacklist(honggfuzz_t * hfuzz);
 
