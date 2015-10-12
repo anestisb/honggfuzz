@@ -1,0 +1,4 @@
+# Exclude 3rd-party Android dependencies
+# TODO: Migrate to git submodules
+capstone
+libunwind
