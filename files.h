@@ -51,7 +51,7 @@ extern bool files_copyFile(const char *source, const char *destination, bool * d
 
 extern bool files_parseBlacklist(honggfuzz_t * hfuzz);
 
-#if defined(_HF_ARCH_LINUX) && defined(DEBUG)
+#if defined(_HF_ARCH_LINUX) && defined(DEBUG_BUILD)
 bool files_procMapsToFile(pid_t pid, const char *fileName);
 #endif
 

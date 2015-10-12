@@ -803,14 +803,14 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
 
     arch_ptraceGenerateReport(pid, fuzzer, funcs, funcCnt, &si, instr, newname);
 
-#if defined(DEBUG)
+#if defined(DEBUG_BUILD)
     char *lastDot = strrchr(newname, '.');
     int baseNameLen = lastDot - newname;
     char mapsFile[PATH_MAX] = { 0 };
     snprintf(mapsFile, PATH_MAX, "%s/%.*s.maps", hfuzz->workDir, baseNameLen, newname);
 
     if (files_procMapsToFile(pid, mapsFile) == false) {
-        LOGMSG(l_ERROR, "Failed to write maps file (pid=%d", pid);
+        LOG_E("Failed to write maps file (pid=%d", pid);
     }
 #endif
 }

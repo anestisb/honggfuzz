@@ -774,7 +774,7 @@ kern_return_t catch_mach_exception_raise_state_identity( __attribute__ ((unused)
 
     fuzzer->backtrace = hash;
 
-#if defined(DEBUG)
+#if defined(DEBUG_BUILD)
     write_crash_report(thread, task, exception, code, code_count, flavor, in_state, in_state_count);
 #endif
 
