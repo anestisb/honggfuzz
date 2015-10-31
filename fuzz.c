@@ -221,7 +221,7 @@ static bool fuzz_prepareFileExternally(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, i
 
     close(dstfd);
 
-    pid_t pid = fork();
+    pid_t pid = arch_fork(hfuzz);
     if (pid == -1) {
         PLOG_E("Couldn't fork");
         return false;
@@ -259,11 +259,106 @@ static bool fuzz_prepareFileExternally(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, i
     abort();                    /* NOTREACHED */
 }
 
+static bool fuzz_runVerifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
+{
+    bool ret = false;
+    int crashFd = -1;
+    uint8_t *crashBuf = NULL;
+    off_t crashFileSz = 0;
+
+    crashBuf = files_mapFile(crashedFuzzer->crashFileName, &crashFileSz, &crashFd, false);
+    if (crashBuf == NULL) {
+        LOG_E("Couldn't open and map '%s' in R/O mode", crashedFuzzer->crashFileName);
+        goto bail;
+    }
+
+    LOG_I("Launching verifier for %" PRIx64 " hash", crashedFuzzer->backtrace);
+    for (int i = 0; i < _HF_VERIFIER_ITER; i++) {
+        fuzzer_t vFuzzer = {
+            .pid = 0,
+            .timeStartedMillis = util_timeNowMillis(),
+            .crashFileName = {0},
+            .pc = 0ULL,
+            .backtrace = 0ULL,
+            .access = 0ULL,
+            .exception = 0,
+            .dynamicFileSz = 0,
+            .dynamicFile = NULL,
+            .hwCnts = {
+                       .cpuInstrCnt = 0ULL,
+                       .cpuBranchCnt = 0ULL,
+                       .pcCnt = 0ULL,
+                       .pathCnt = 0ULL,
+                       .customCnt = 0ULL,
+                       },
+            .report = {'\0'},
+            .mainWorker = false
+        };
+
+        fuzz_getFileName(hfuzz, vFuzzer.fileName);
+        if (files_writeBufToFile
+            (vFuzzer.fileName, crashBuf, crashFileSz, O_WRONLY | O_CREAT | O_EXCL) == false) {
+            LOG_E("Couldn't write buffer to file '%s'", vFuzzer.fileName);
+            goto bail;
+        }
+
+        vFuzzer.pid = arch_fork(hfuzz);
+        if (vFuzzer.pid == -1) {
+            PLOG_F("Couldn't fork");
+            return false;
+        }
+
+        if (!vFuzzer.pid) {
+            if (!arch_launchChild(hfuzz, crashedFuzzer->crashFileName)) {
+                LOG_E("Error launching verifier child process");
+                goto bail;
+            }
+        }
+
+        arch_reapChild(hfuzz, &vFuzzer);
+        unlink(vFuzzer.fileName);
+
+        /* If stack hash doesn't match skip name tag and exit */
+        if (crashedFuzzer->backtrace != vFuzzer.backtrace) {
+            LOG_D("Verifier stack hash mismatch");
+            goto bail;
+        }
+    }
+
+    /* Workspace is inherited, just append a extra suffix */
+    char verFile[PATH_MAX] = { 0 };
+    snprintf(verFile, sizeof(verFile), "%s.verified", crashedFuzzer->crashFileName);
+
+    int verFileFd = open(verFile, O_CREAT | O_EXCL | O_RDWR, 0644);
+    if (verFileFd == -1) {
+        LOG_E("Couldn't create verified file '%s' in the current directory", verFile);
+        goto bail;
+    }
+
+    if (!files_writeToFd(verFileFd, crashBuf, crashFileSz)) {
+        close(verFileFd);
+        goto bail;
+    }
+
+    LOG_I("Successfully verified, saving as (%s)", verFile);
+    ret = true;
+
+ bail:
+    if (crashBuf) {
+        munmap(crashBuf, crashFileSz);
+    }
+    if (crashFd != -1) {
+        close(crashFd);
+    }
+    return ret;
+}
+
 static void fuzz_fuzzLoop(honggfuzz_t * hfuzz)
 {
     fuzzer_t fuzzer = {
         .pid = 0,
         .timeStartedMillis = util_timeNowMillis(),
+        .crashFileName = {0},
         .pc = 0ULL,
         .backtrace = 0ULL,
         .access = 0ULL,
@@ -277,7 +372,8 @@ static void fuzz_fuzzLoop(honggfuzz_t * hfuzz)
                    .pathCnt = 0ULL,
                    .customCnt = 0ULL,
                    },
-        .report = {'\0'}
+        .report = {'\0'},
+        .mainWorker = true
     };
     if (fuzzer.dynamicFile == NULL) {
         LOG_F("malloc(%zu) failed", hfuzz->maxFileSz);
@@ -370,6 +466,12 @@ static void fuzz_fuzzLoop(honggfuzz_t * hfuzz)
             }
         }
         MX_UNLOCK(&hfuzz->dynamicFile_mutex);
+    }
+
+    if (hfuzz->useVerifier && (fuzzer.crashFileName[0] != 0)) {
+        if (!fuzz_runVerifier(hfuzz, &fuzzer)) {
+            LOG_I("Failed to verify %s", fuzzer.crashFileName);
+        }
     }
 
     report_Report(hfuzz, fuzzer.report);

@@ -534,3 +534,33 @@ bool files_parseBlacklist(honggfuzz_t * hfuzz)
     fclose(fBl);
     return true;
 }
+
+uint8_t *files_mapFile(char *fileName, off_t * fileSz, int *fd, bool isWritable)
+{
+    int mmapProt = PROT_READ;
+    if (isWritable) {
+        mmapProt |= PROT_WRITE;
+    }
+
+    if ((*fd = open(fileName, O_RDONLY)) == -1) {
+        PLOG_E("Couldn't open() '%s' file in R/O mode", fileName);
+        return NULL;
+    }
+
+    struct stat st;
+    if (fstat(*fd, &st) == -1) {
+        PLOG_E("Couldn't stat() the '%s' file", fileName);
+        close(*fd);
+        return NULL;
+    }
+
+    uint8_t *buf;
+    if ((buf = mmap(NULL, st.st_size, mmapProt, MAP_PRIVATE, *fd, 0)) == MAP_FAILED) {
+        PLOG_E("Couldn't mmap() the '%s' file", fileName);
+        close(*fd);
+        return NULL;
+    }
+
+    *fileSz = st.st_size;
+    return buf;
+}

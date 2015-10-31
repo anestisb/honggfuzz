@@ -147,6 +147,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         .nullifyStdio = false,
         .useScreen = true,
         .fuzzStdin = false,
+        .useVerifier = false,
         .saveUnique = true,
         .fileExtn = "fuzz",
         .workDir = ".",
@@ -205,6 +206,9 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         {{"save_all", no_argument, NULL, 'u'}, "Save all test-cases (not only the unique ones) by appending the current time-stamp to the filenames"},
         {{"logfile", required_argument, NULL, 'l'}, "Log file"},
         {{"verbose", no_argument, NULL, 'v'}, "Disable ANSI console; use simple log output"},
+#if defined(_HF_ARCH_LINUX)
+        {{"verifier", no_argument, NULL, 'V'}, "Enable crashes verifier (default: false"},
+#endif
         {{"debug_level", required_argument, NULL, 'd'}, "Debug level (0 - FATAL ... 4 - DEBUG), (default: '3' [INFO])"},
         {{"extension", required_argument, NULL, 'e'}, "Input file extension (e.g. 'swf'), (default: 'fuzz')"},
         {{"wokspace", required_argument, NULL, 'W'}, "Workspace directory to save crashes & runtime files (default: '.')"},
@@ -245,7 +249,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
     const char *logfile = NULL;
     int opt_index = 0;
     for (;;) {
-        int c = getopt_long(argc, argv, "-?hqvsuf:d:e:W:r:c:F:t:R:n:N:l:p:g:E:w:B:", opts,
+        int c = getopt_long(argc, argv, "-?hqvVsuf:d:e:W:r:c:F:t:R:n:N:l:p:g:E:w:B:", opts,
                             &opt_index);
         if (c < 0)
             break;
@@ -263,6 +267,9 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
             break;
         case 'v':
             hfuzz->useScreen = false;
+            break;
+        case 'V':
+            hfuzz->useVerifier = true;
             break;
         case 's':
             hfuzz->fuzzStdin = true;
