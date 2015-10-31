@@ -341,6 +341,7 @@ static bool fuzz_runVerifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
     }
 
     LOG_I("Successfully verified, saving as (%s)", verFile);
+    __sync_fetch_and_add(&hfuzz->verifiedCrashesCnt, 1UL);
     ret = true;
 
  bail:
