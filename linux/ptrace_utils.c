@@ -840,7 +840,8 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
     char *lastDot = strrchr(fuzzer->crashFileName, '.');
     int baseNameLen = lastDot - fuzzer->crashFileName;
     char mapsFile[PATH_MAX] = { 0 };
-    snprintf(mapsFile, PATH_MAX, "%s/%.*s.maps", hfuzz->workDir, baseNameLen, fuzzer->crashFileName);
+    snprintf(mapsFile, PATH_MAX, "%s/%.*s.maps", hfuzz->workDir, baseNameLen,
+             fuzzer->crashFileName);
 
     if (files_procMapsToFile(pid, mapsFile) == false) {
         LOG_E("Failed to write maps file (pid=%d", pid);
