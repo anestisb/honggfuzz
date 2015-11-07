@@ -168,6 +168,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         .asLimit = 0ULL,
         .files = NULL,
         .fileCnt = 0,
+        .lastCheckedFileIndex = 0,
         .pid = 0,
         .envs = {[0 ... (ARRAYSIZE(hfuzz->envs) - 1)] = NULL,},
 
@@ -207,7 +208,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         {{"save_all", no_argument, NULL, 'u'}, "Save all test-cases (not only the unique ones) by appending the current time-stamp to the filenames"},
         {{"logfile", required_argument, NULL, 'l'}, "Log file"},
         {{"verbose", no_argument, NULL, 'v'}, "Disable ANSI console; use simple log output"},
-#if defined(_HF_ARCH_LINUX)
+#if defined(_HF_ARCH_LINUX) || defined(_HF_ARCH_DARWIN)
         {{"verifier", no_argument, NULL, 'V'}, "Enable crashes verifier (default: disabled)"},
 #endif
         {{"debug_level", required_argument, NULL, 'd'}, "Debug level (0 - FATAL ... 4 - DEBUG), (default: '3' [INFO])"},
@@ -409,6 +410,10 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
     if (hfuzz->pid > 0) {
         LOG_I("PID=%d specified, lowering maximum number of concurrent threads to 1", hfuzz->pid);
         hfuzz->threadsMax = 1;
+    }
+
+    if (hfuzz->flipRate == 0.0L && hfuzz->useVerifier) {
+        LOG_I("Verifier enabled with 0.0flipRate, activating dry run mode");
     }
 
     LOG_I("inputFile '%s', nullifyStdio: %s, fuzzStdin: %s, saveUnique: %s, flipRate: %lf, "

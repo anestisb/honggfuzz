@@ -329,19 +329,21 @@ static bool fuzz_runVerifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
     char verFile[PATH_MAX] = { 0 };
     snprintf(verFile, sizeof(verFile), "%s.verified", crashedFuzzer->crashFileName);
 
-    int verFileFd = open(verFile, O_CREAT | O_EXCL | O_RDWR, 0644);
-    if (verFileFd == -1) {
-        LOG_E("Couldn't create verified file '%s' in the current directory", verFile);
-        goto bail;
+    /* Copy file with new suffix & remove original copy */
+    bool dstFileExists = false;
+    if (files_copyFile(crashedFuzzer->crashFileName, verFile, &dstFileExists)) {
+        LOG_I("Successfully verified, saving as (%s)", verFile);
+        __sync_fetch_and_add(&hfuzz->verifiedCrashesCnt, 1UL);
+        unlink(crashedFuzzer->crashFileName);
+    } else {
+        if (dstFileExists) {
+            LOG_I("It seems that '%s' already exists, skipping", verFile);
+        } else {
+            LOG_E("Couldn't copy '%s' to '%s'", crashedFuzzer->crashFileName, verFile);
+            goto bail;
+        }
     }
 
-    if (!files_writeToFd(verFileFd, crashBuf, crashFileSz)) {
-        close(verFileFd);
-        goto bail;
-    }
-
-    LOG_I("Successfully verified, saving as (%s)", verFile);
-    __sync_fetch_and_add(&hfuzz->verifiedCrashesCnt, 1UL);
     ret = true;
 
  bail:
@@ -381,6 +383,12 @@ static void fuzz_fuzzLoop(honggfuzz_t * hfuzz)
     }
 
     int rnd_index = util_rndGet(0, hfuzz->fileCnt - 1);
+
+    /* If dry run mode, pick the next file and not a random one */
+    if (hfuzz->flipRate == 0.0L && hfuzz->useVerifier) {
+        rnd_index = __sync_fetch_and_add(&hfuzz->lastCheckedFileIndex, 1UL);
+    }
+
     strncpy(fuzzer.origFileName, files_basename(hfuzz->files[rnd_index]), PATH_MAX);
     fuzz_getFileName(hfuzz, fuzzer.fileName);
 
@@ -484,8 +492,18 @@ static void *fuzz_threadNew(void *arg)
 {
     honggfuzz_t *hfuzz = (honggfuzz_t *) arg;
     for (;;) {
-        if ((__sync_fetch_and_add(&hfuzz->mutationsCnt, 1UL) >= hfuzz->mutationsMax)
-            && hfuzz->mutationsMax) {
+        /* Check if dry run mode with verifier enabled */
+        if (hfuzz->flipRate == 0.0L && hfuzz->useVerifier) {
+            if (__sync_fetch_and_add(&hfuzz->mutationsCnt, 1UL) >= hfuzz->fileCnt) {
+                __sync_fetch_and_add(&hfuzz->threadsFinished, 1UL);
+                // All files checked, weak-up the main process
+                pthread_kill(fuzz_mainThread, SIGALRM);
+                return NULL;
+            }
+        }
+        /* Check for max iterations limit if set */
+        else if ((__sync_fetch_and_add(&hfuzz->mutationsCnt, 1UL) >= hfuzz->mutationsMax)
+                 && hfuzz->mutationsMax) {
             __sync_fetch_and_add(&hfuzz->threadsFinished, 1UL);
             // Wake-up the main process
             pthread_kill(fuzz_mainThread, SIGALRM);
