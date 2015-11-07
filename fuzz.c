@@ -128,6 +128,13 @@ static bool fuzz_prepareFileDynamically(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, 
 
     MX_UNLOCK(&hfuzz->dynamicFile_mutex);
 
+    /* 
+     * if flip rate is 0.0, early abort file mangling. This will leave perf counters
+     * with values equal to dry runs against input corpus.
+     */
+    if (hfuzz->flipRate != 0.0L) {
+        goto skipMangling;
+    }
     /* The first pass should be on an empty/initial file */
     if (hfuzz->hwCnts.cpuInstrCnt > 0 || hfuzz->hwCnts.cpuBranchCnt > 0 || hfuzz->hwCnts.pcCnt > 0
         || hfuzz->hwCnts.pathCnt > 0 || hfuzz->hwCnts.customCnt > 0) {
@@ -148,6 +155,7 @@ static bool fuzz_prepareFileDynamically(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, 
 
     }
 
+ skipMangling:
     if (files_writeBufToFile
         (fuzzer->fileName, fuzzer->dynamicFile, fuzzer->dynamicFileSz,
          O_WRONLY | O_CREAT | O_EXCL | O_TRUNC) == false) {
@@ -166,19 +174,23 @@ static bool fuzz_prepareFile(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, int rnd_ind
         LOG_E("Couldn't read contents of '%s'", hfuzz->files[rnd_index]);
         return false;
     }
+
+    /* If flip rate is 0.0, early abort file mangling */
+    if (hfuzz->flipRate != 0.0L) {
 #if defined(EXTENSION_ENABLED) && defined(_HF_MANGLERESIZECALLBACK)
-    UserMangleResizeCallback(hfuzz, fuzzer->dynamicFile, &fileSz);
+        UserMangleResizeCallback(hfuzz, fuzzer->dynamicFile, &fileSz);
 #else
-    mangle_Resize(hfuzz, fuzzer->dynamicFile, &fileSz);
+        mangle_Resize(hfuzz, fuzzer->dynamicFile, &fileSz);
 #endif
 #if defined(EXTENSION_ENABLED) && defined(_HF_MANGLECALLBACK)
-    UserMangleCallback(hfuzz, fuzzer->dynamicFile, fileSz, rnd_index);
+        UserMangleCallback(hfuzz, fuzzer->dynamicFile, fileSz, rnd_index);
 #else
-    mangle_mangleContent(hfuzz, fuzzer->dynamicFile, fileSz);
+        mangle_mangleContent(hfuzz, fuzzer->dynamicFile, fileSz);
 #endif
 #if defined(EXTENSION_ENABLED) && defined(_HF_POSTMANGLECALLBACK)
-    UserPostMangleCallback(hfuzz, fuzzer->dynamicFile, fileSz);
+        UserPostMangleCallback(hfuzz, fuzzer->dynamicFile, fileSz);
 #endif
+    }
 
     if (files_writeBufToFile
         (fuzzer->fileName, fuzzer->dynamicFile, fileSz, O_WRONLY | O_CREAT | O_EXCL) == false) {
@@ -382,7 +394,7 @@ static void fuzz_fuzzLoop(honggfuzz_t * hfuzz)
         LOG_F("malloc(%zu) failed", hfuzz->maxFileSz);
     }
 
-    int rnd_index = util_rndGet(0, hfuzz->fileCnt - 1);
+    size_t rnd_index = util_rndGet(0, hfuzz->fileCnt - 1);
 
     /* If dry run mode, pick the next file and not a random one */
     if (hfuzz->flipRate == 0.0L && hfuzz->useVerifier) {
