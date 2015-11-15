@@ -565,6 +565,9 @@ void fuzz_main(honggfuzz_t * hfuzz)
     if (hfuzz->blacklist) {
         free(hfuzz->blacklist);
     }
+    if (hfuzz->symbolsBlacklist) {
+        free(hfuzz->symbolsBlacklist);
+    }
 
     _exit(EXIT_SUCCESS);
 }

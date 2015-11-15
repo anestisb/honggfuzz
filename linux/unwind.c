@@ -168,3 +168,17 @@ size_t arch_unwindStack(pid_t pid, funcs_t * funcs)
     return num_frames;
 }
 #endif                          /* defined(__ANDROID__) */
+
+char *arch_btContainsBLSymbol(honggfuzz_t * hfuzz, size_t num_frames, funcs_t * funcs)
+{
+    for (size_t frame = 0; frame < num_frames; frame++) {
+        for (size_t symbol = 0; symbol < hfuzz->symbolsBlacklistCnt; symbol++) {
+            if (strlen(funcs[frame].func) > 0 && strncmp
+                (funcs[frame].func, hfuzz->symbolsBlacklist[symbol],
+                 strlen(funcs[frame].func)) == 0) {
+                return funcs[frame].func;
+            }
+        }
+    }
+    return NULL;
+}

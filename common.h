@@ -87,6 +87,9 @@ typedef struct {
     const char *blacklistFile;
     uint64_t *blacklist;
     size_t blacklistCnt;
+    const char *symbolsBlacklistFile;
+    const char **symbolsBlacklist;
+    size_t symbolsBlacklistCnt;
     long tmOut;
     size_t dictionaryCnt;
     size_t mutationsMax;
