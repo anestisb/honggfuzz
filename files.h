@@ -59,6 +59,8 @@ extern int files_readSysFS(const char *source, char *buf, size_t bufSz);
 
 extern bool files_parseBlacklist(honggfuzz_t * hfuzz);
 
+extern bool files_parseSymbolsBlacklist(honggfuzz_t * hfuzz);
+
 extern uint8_t *files_mapFile(char *fileName, off_t * fileSz, int *fd, bool isWritable);
 
 #endif

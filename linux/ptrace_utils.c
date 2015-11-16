@@ -812,6 +812,18 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
         return;
     }
 
+    /*
+     * Check if backtrace contains blacklisted symbol
+     */
+    if (hfuzz->symbolsBlacklist) {
+        char *blSymbol = arch_btContainsBLSymbol(hfuzz, funcCnt, funcs);
+        if (blSymbol != NULL) {
+            LOG_I("Blacklisted symbol '%s' found, skipping", blSymbol);
+            __sync_fetch_and_add(&hfuzz->blCrashesCnt, 1UL);
+            return;
+        }
+    }
+
     void *sig_addr = si.si_addr;
     if (hfuzz->disableRandomization == false) {
         pc = 0UL;

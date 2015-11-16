@@ -535,6 +535,42 @@ bool files_parseBlacklist(honggfuzz_t * hfuzz)
     return true;
 }
 
+bool files_parseSymbolsBlacklist(honggfuzz_t * hfuzz)
+{
+    FILE *fSBl = fopen(hfuzz->symbolsBlacklistFile, "rb");
+    if (fSBl == NULL) {
+        PLOG_E("Couldn't open '%s' - R/O mode", hfuzz->symbolsBlacklistFile);
+        return false;
+    }
+
+    for (;;) {
+        char *lineptr = NULL;
+        size_t n = 0;
+        if (getdelim(&lineptr, &n, '\0', fSBl) == -1) {
+            break;
+        }
+        if ((hfuzz->symbolsBlacklist =
+             realloc(hfuzz->symbolsBlacklist,
+                     (hfuzz->symbolsBlacklistCnt + 1) * sizeof(hfuzz->symbolsBlacklist[0]))) ==
+            NULL) {
+            PLOG_E("Realloc failed (sz=%zu)",
+                   (hfuzz->symbolsBlacklistCnt + 1) * sizeof(hfuzz->symbolsBlacklist[0]));
+            fclose(fSBl);
+            return false;
+        }
+        hfuzz->symbolsBlacklist[hfuzz->symbolsBlacklistCnt] = lineptr;
+        hfuzz->symbolsBlacklistCnt += 1;
+    }
+
+    if (hfuzz->symbolsBlacklistCnt > 0) {
+        LOG_I("Loaded %zu symbol(s) from the blacklist file", hfuzz->symbolsBlacklistCnt);
+    } else {
+        LOG_F("Empty symbols blacklist file '%s'", hfuzz->symbolsBlacklistFile);
+    }
+    fclose(fSBl);
+    return true;
+}
+
 uint8_t *files_mapFile(char *fileName, off_t * fileSz, int *fd, bool isWritable)
 {
     int mmapProt = PROT_READ;
