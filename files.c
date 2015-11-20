@@ -452,7 +452,7 @@ bool files_parseBlacklist(honggfuzz_t * hfuzz)
     return true;
 }
 
-#if defined(_HF_ARCH_LINUX) && defined(DEBUG_BUILD)
+#if defined(_HF_ARCH_LINUX)
 #define PROC_MAP_SZ   2176
 #define PROC_MAP_SZ_  2175
 #define XSTR(A)       STRI(A)

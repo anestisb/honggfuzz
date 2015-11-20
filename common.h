@@ -78,6 +78,7 @@ typedef struct {
     bool saveUnique;
     bool useScreen;
     bool useVerifier;
+    bool saveMaps;
     char *fileExtn;
     char *workDir;
     double flipRate;
