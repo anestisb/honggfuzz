@@ -405,8 +405,6 @@ bool files_copyFile(const char *source, const char *destination, bool * dstExist
 }
 
 #if defined(_HF_ARCH_LINUX)
-#if defined(DEBUG_BUILD)
-
 #define PROC_MAP_SZ   2176
 #define PROC_MAP_SZ_  2175
 #define XSTR(A)       STRI(A)
@@ -457,7 +455,6 @@ bool files_procMapsToFile(pid_t pid, const char *fileName)
 
     return true;
 }
-#endif                          /* defined(DEBUG_BUILD) */
 #endif                          /* defined(_HF_ARCH_LINUX) */
 
 int files_readSysFS(const char *source, char *buf, size_t bufSz)
