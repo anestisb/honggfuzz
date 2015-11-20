@@ -74,9 +74,11 @@ int main(int argc, char **argv)
         LOG_F("Couldn't parse stackhash blacklist file ('%s')", hfuzz.blacklistFile);
     }
 
+#if defined(_HF_ARCH_LINUX)
     if (hfuzz.symbolsBlacklistFile && (files_parseSymbolsBlacklist(&hfuzz) == false)) {
         LOG_F("Couldn't parse symbols blacklist file ('%s')", hfuzz.symbolsBlacklistFile);
     }
+#endif
 
     /*
      * So far so good
