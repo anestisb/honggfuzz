@@ -93,11 +93,11 @@ typedef struct {
     size_t threadsMax;
     size_t threadsFinished;
     size_t maxFileSz;
-    void *ignoreAddr;
     char *reportFile;
     uint64_t asLimit;
     char **files;
-    int fileCnt;
+    size_t fileCnt;
+    size_t lastCheckedFileIndex;
     pid_t pid;
     char *envs[128];
 
@@ -105,6 +105,7 @@ typedef struct {
     size_t mutationsCnt;
     size_t crashesCnt;
     size_t uniqueCrashesCnt;
+    size_t verifiedCrashesCnt;
     size_t blCrashesCnt;
     size_t timeoutedCnt;
 
@@ -117,6 +118,7 @@ typedef struct {
     pthread_mutex_t dynamicFile_mutex;
     bool disableRandomization;
     bool msanReportUMRS;
+    void *ignoreAddr;
 } honggfuzz_t;
 
 typedef struct fuzzer_t {
