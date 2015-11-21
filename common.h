@@ -53,6 +53,15 @@
 /* Number of crash verifier iterations before tag crash as stable */
 #define _HF_VERIFIER_ITER   5
 
+/*
+ * If enabled simplifier aborts on size mismatch between seed & crash. Otherwise
+ * it tries to revert bytes up to offset of smaller file.
+ */
+#define __HF_ABORT_SIMPLIFIER_ON_SIZ_MISMATCH true
+
+/* Maximum number of diff bytes to try reverting - skipping continus diff blobs */
+#define __HF_ABORT_SIMPLIFIER_MAX_DIFF 30
+
 typedef enum {
     _HF_DYNFILE_NONE = 0x0,
     _HF_DYNFILE_INSTR_COUNT = 0x1,
@@ -79,6 +88,7 @@ typedef struct {
     bool useScreen;
     bool useVerifier;
     bool saveMaps;
+    bool useSimplifier;
     char *fileExtn;
     char *workDir;
     double flipRate;

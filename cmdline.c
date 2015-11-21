@@ -215,6 +215,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
 #if defined(_HF_ARCH_LINUX) || defined(_HF_ARCH_DARWIN)
         {{"verifier", no_argument, NULL, 'V'}, "Enable crashes verifier (default: disabled)"},
         {{"proc_maps", no_argument, NULL, 'M'}, "Enable proc maps saving (default: disabled)"},
+        {{"simplifier", no_argument, NULL, 'S'}, "Enable crashes simplifier (default: disabled)"},
 #endif
         {{"debug_level", required_argument, NULL, 'd'}, "Debug level (0 - FATAL ... 4 - DEBUG), (default: '3' [INFO])"},
         {{"extension", required_argument, NULL, 'e'}, "Input file extension (e.g. 'swf'), (default: 'fuzz')"},
@@ -259,7 +260,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
     const char *logfile = NULL;
     int opt_index = 0;
     for (;;) {
-        int c = getopt_long(argc, argv, "-?hqvVMsuf:d:e:W:r:c:F:t:R:n:N:l:p:g:E:w:B:b:", opts,
+        int c = getopt_long(argc, argv, "-?hqvVMSsuf:d:e:W:r:c:F:t:R:n:N:l:p:g:E:w:B:b:", opts,
                             &opt_index);
         if (c < 0)
             break;
@@ -283,6 +284,8 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
             break;
         case 'M':
             hfuzz->saveMaps = true;
+        case 'S':
+            hfuzz->useSimplifier = true;
             break;
         case 's':
             hfuzz->fuzzStdin = true;

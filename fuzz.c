@@ -368,6 +368,169 @@ static bool fuzz_runVerifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
     return ret;
 }
 
+static bool fuzz_runSimplifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
+{
+    bool ret = false;
+    int origFd = -1, crashFd = -1;
+    uint8_t *origBuf = NULL, *crashBuf = NULL;
+    off_t origFileSz = 0, crashFileSz = 0;
+    size_t diffBytesCnt = 0, revertedBytes = 0, curOff = 0, iterCnt = 0;
+    bool largeDiffBlob = false;
+
+    crashBuf = files_mapFile(crashedFuzzer->crashFileName, &crashFileSz, &crashFd, true);
+    if (crashBuf == NULL) {
+        LOG_E("Couldn't open and map '%s' in R/O mode", crashedFuzzer->crashFileName);
+        goto bail;
+    }
+
+    origBuf = files_mapFile(crashedFuzzer->origFileName, &origFileSz, &origFd, false);
+    if (crashBuf == NULL) {
+        LOG_E("Couldn't open and map '%s' in R/O mode", crashedFuzzer->origFileName);
+        goto bail;
+    }
+
+    /* Calculate iterations counter */
+    if (origFileSz != crashFileSz) {
+#if __HF_ABORT_SIMPLIFIER_ON_SIZ_MISMATCH
+        LOG_E("Simplifier size mismatch abort is enabled");
+        goto bail;
+#else
+        iterCnt = MIN(crashFileSz, origFileSz);
+#endif
+    } else {
+        iterCnt = crashFileSz;
+    }
+
+    LOG_D("Launching simplifier for %s", crashedFuzzer->crashFileName);
+    for (; curOff < iterCnt; curOff++) {
+        if (origBuf[curOff] == crashBuf[curOff]) {
+            /* Reset large diff blob */
+            largeDiffBlob = false;
+            continue;
+        }
+
+        /* If insider largeDiffBlob skip everything until hit first non-diff offset */
+        if (largeDiffBlob) {
+            continue;
+        }
+
+        /* Check if large diff blob started (more then 4 bytes sequentially) */
+        if (curOff < iterCnt - 4 && 
+            origBuf[curOff+1] != crashBuf[curOff+1] &&
+            origBuf[curOff+2] != crashBuf[curOff+2] &&
+            origBuf[curOff+3] != crashBuf[curOff+3]) {
+            largeDiffBlob = true;
+            continue;
+        }
+
+        /* Verify that changes fit into sane ranges */
+        diffBytesCnt++;
+        if (diffBytesCnt > __HF_ABORT_SIMPLIFIER_MAX_DIFF) {
+            LOG_E("Simplifier hit maximum diff tries, aborting");
+            goto bail;
+        }
+
+        /* Revert change */
+        char oldVal = crashBuf[curOff];
+        crashBuf[curOff] = origBuf[curOff];
+        
+                LOG_D("%u (%u)", curOff, iterCnt);
+
+        fuzzer_t sFuzzer = {
+            .pid = 0,
+            .timeStartedMillis = util_timeNowMillis(),
+            .crashFileName = {0},
+            .pc = 0ULL,
+            .backtrace = 0ULL,
+            .access = 0ULL,
+            .exception = 0,
+            .dynamicFileSz = 0,
+            .dynamicFile = NULL,
+            .hwCnts = {
+                       .cpuInstrCnt = 0ULL,
+                       .cpuBranchCnt = 0ULL,
+                       .pcCnt = 0ULL,
+                       .pathCnt = 0ULL,
+                       .customCnt = 0ULL,
+                       },
+            .report = {'\0'},
+            .mainWorker = false
+        };
+
+        fuzz_getFileName(hfuzz, sFuzzer.fileName);
+        if (files_writeBufToFile
+            (sFuzzer.fileName, crashBuf, crashFileSz, O_WRONLY | O_CREAT | O_EXCL) == false) {
+            LOG_E("Couldn't write buffer to file '%s'", sFuzzer.fileName);
+            goto bail;
+        }
+
+        sFuzzer.pid = arch_fork(hfuzz);
+        if (sFuzzer.pid == -1) {
+            PLOG_F("Couldn't fork");
+            return false;
+        }
+
+        if (!sFuzzer.pid) {
+            if (!arch_launchChild(hfuzz, crashedFuzzer->crashFileName)) {
+                LOG_E("Error launching simplifier child process");
+                goto bail;
+            }
+        }
+
+        arch_reapChild(hfuzz, &sFuzzer);
+        unlink(sFuzzer.fileName);
+
+        /* If stack hash doesn't match don't apply revert */
+        if (crashedFuzzer->backtrace != sFuzzer.backtrace) {
+            crashBuf[curOff] = oldVal;
+        } else {
+            revertedBytes++;
+        }
+    }
+
+    /* Nothing to write if all tries failed */
+    if (revertedBytes == 0) {
+        LOG_I("Simplifier failed to revert any changes");
+        goto bail;
+    }
+
+    /* Workspace is inherited, just append a extra suffix */
+    char sFile[PATH_MAX] = { 0 };
+    snprintf(sFile, sizeof(sFile), "%s.simplified", crashedFuzzer->crashFileName);
+
+    /* Copy file with new suffix & remove original copy */
+    bool dstFileExists = false;
+    if (files_copyFile(crashedFuzzer->crashFileName, sFile, &dstFileExists)) {
+        LOG_I("Successfully simplified, saving as (%s)", sFile);
+        unlink(crashedFuzzer->crashFileName);
+    } else {
+        if (dstFileExists) {
+            LOG_I("It seems that '%s' already exists, skipping", sFile);
+        } else {
+            LOG_E("Couldn't copy '%s' to '%s'", crashedFuzzer->crashFileName, sFile);
+            goto bail;
+        }
+    }
+
+    LOG_D("'%s' has been successfully simplified (%u bytes reverted)", crashedFuzzer->crashFileName, revertedBytes);
+    ret = true;
+
+ bail:
+    if (crashBuf) {
+        munmap(crashBuf, crashFileSz);
+    }
+    if (crashFd != -1) {
+        close(crashFd);
+    }
+    if (origBuf) {
+        munmap(origBuf, origFileSz);
+    }
+    if (origFd != -1) {
+        close(origFd);
+    }
+    return ret;
+}
+
 static void fuzz_fuzzLoop(honggfuzz_t * hfuzz)
 {
     fuzzer_t fuzzer = {
@@ -492,6 +655,12 @@ static void fuzz_fuzzLoop(honggfuzz_t * hfuzz)
     if (hfuzz->useVerifier && (fuzzer.crashFileName[0] != 0)) {
         if (!fuzz_runVerifier(hfuzz, &fuzzer)) {
             LOG_I("Failed to verify %s", fuzzer.crashFileName);
+        }
+    }
+
+    if (hfuzz->useSimplifier && (fuzzer.crashFileName[0] != 0)) {
+        if (!fuzz_runSimplifier(hfuzz, &fuzzer)) {
+            LOG_I("Failed to simplify %s", fuzzer.crashFileName);
         }
     }
 
