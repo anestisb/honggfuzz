@@ -24,6 +24,7 @@
 #include "common.h"
 #include "linux/unwind.h"
 
+#include <string.h>
 #include <libunwind-ptrace.h>
 
 #include "log.h"
