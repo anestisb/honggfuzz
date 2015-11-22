@@ -383,8 +383,6 @@ static bool fuzz_runSimplifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
         /* Revert change */
         char oldVal = crashBuf[curOff];
         crashBuf[curOff] = origBuf[curOff];
-        
-                LOG_D("%u (%u)", curOff, iterCnt);
 
         fuzzer_t sFuzzer = {
             .pid = 0,
