@@ -546,6 +546,14 @@ bool files_parseSymbolsBlacklist(honggfuzz_t * hfuzz)
         if (getdelim(&lineptr, &n, '\0', fSBl) == -1) {
             break;
         }
+
+        /* Check for empty or too short symbols */
+        if (strlen(lineptr) < 3) {
+            LOG_F("Input symbol '%s' too short (strlen < 3)", lineptr);
+            fclose(fSBl);
+            return false;
+        }
+
         if ((hfuzz->symbolsBlacklist =
              realloc(hfuzz->symbolsBlacklist,
                      (hfuzz->symbolsBlacklistCnt + 1) * sizeof(hfuzz->symbolsBlacklist[0]))) ==
@@ -565,6 +573,50 @@ bool files_parseSymbolsBlacklist(honggfuzz_t * hfuzz)
         LOG_F("Empty symbols blacklist file '%s'", hfuzz->symbolsBlacklistFile);
     }
     fclose(fSBl);
+    return true;
+}
+
+bool files_parseSymbolsWhitelist(honggfuzz_t * hfuzz)
+{
+    FILE *fSWl = fopen(hfuzz->symbolsWhitelistFile, "rb");
+    if (fSWl == NULL) {
+        PLOG_E("Couldn't open '%s' - R/O mode", hfuzz->symbolsWhitelistFile);
+        return false;
+    }
+
+    for (;;) {
+        char *lineptr = NULL;
+        size_t n = 0;
+        if (getdelim(&lineptr, &n, '\0', fSWl) == -1) {
+            break;
+        }
+
+        /* Check for empty or too short symbols */
+        if (strlen(lineptr) < 3) {
+            LOG_F("Input symbol '%s' too short (strlen < 3)", lineptr);
+            fclose(fSWl);
+            return false;
+        }
+
+        if ((hfuzz->symbolsWhitelist =
+             realloc(hfuzz->symbolsWhitelist,
+                     (hfuzz->symbolsWhitelistCnt + 1) * sizeof(hfuzz->symbolsWhitelist[0]))) ==
+            NULL) {
+            PLOG_E("Realloc failed (sz=%zu)",
+                   (hfuzz->symbolsWhitelistCnt + 1) * sizeof(hfuzz->symbolsWhitelist[0]));
+            fclose(fSWl);
+            return false;
+        }
+        hfuzz->symbolsWhitelist[hfuzz->symbolsWhitelistCnt] = lineptr;
+        hfuzz->symbolsWhitelistCnt += 1;
+    }
+
+    if (hfuzz->symbolsWhitelistCnt > 0) {
+        LOG_I("Loaded %zu symbol(s) from the whitelist file", hfuzz->symbolsWhitelistCnt);
+    } else {
+        LOG_F("Empty symbols whitelist file '%s'", hfuzz->symbolsWhitelistFile);
+    }
+    fclose(fSWl);
     return true;
 }
 

@@ -744,6 +744,7 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
         PLOG_W("Couldn't get siginfo for pid %d", pid);
     }
 
+    void *sig_addr = si.si_addr;
     arch_getInstrStr(pid, &pc, instr);
 
     LOG_D("Pid: %d, signo: %d, errno: %d, code: %d, addr: %p, pc: %"
@@ -803,6 +804,32 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
     /* Increase global crashes counter */
     __sync_fetch_and_add(&hfuzz->crashesCnt, 1UL);
 
+    /*
+     * Check if backtrace contains whitelisted symbol. Whitelist overrides
+     * both stacktrace and symbol blacklist.
+     */
+    if (hfuzz->symbolsWhitelist) {
+        char *wlSymbol = arch_btContainsWLSymbol(hfuzz, funcCnt, funcs);
+        if (wlSymbol != NULL && hfuzz->saveUnique) {            
+            /* 
+             * In order to enforce whitelist symbol crashes saving, stackhashes
+             * need a prefix mask to avoid hitting identical crash name fingerprint.
+             * The mask is a simple magic number plus an a random ID from 0-9, allowing
+             * saving of up to 10 different crashes.
+             */
+            /* Save up to 10 whitelist cases */
+            uint8_t id = (uint8_t)util_rndGet(0, 9);
+            uint64_t mask = 0xAAAAA00 + id;
+
+            /* Shift mask to most significant part of the stack hash */
+            mask <<= 8;
+            fuzzer->backtrace = fuzzer->backtrace | mask;
+            
+            LOG_I("Whitelisted symbol '%s' found, skipping blackilist checks", wlSymbol);
+            goto saveCrash;
+        }
+    }
+
     /* 
      * Check if stackhash is blacklisted
      */
@@ -825,7 +852,7 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
         }
     }
 
-    void *sig_addr = si.si_addr;
+ saveCrash:
     if (hfuzz->disableRandomization == false) {
         pc = 0UL;
         sig_addr = NULL;

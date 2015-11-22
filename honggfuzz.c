@@ -73,10 +73,13 @@ int main(int argc, char **argv)
     if (hfuzz.blacklistFile && (files_parseBlacklist(&hfuzz) == false)) {
         LOG_F("Couldn't parse stackhash blacklist file ('%s')", hfuzz.blacklistFile);
     }
-
 #if defined(_HF_ARCH_LINUX)
     if (hfuzz.symbolsBlacklistFile && (files_parseSymbolsBlacklist(&hfuzz) == false)) {
         LOG_F("Couldn't parse symbols blacklist file ('%s')", hfuzz.symbolsBlacklistFile);
+    }
+
+    if (hfuzz.symbolsWhitelistFile && (files_parseSymbolsWhitelist(&hfuzz) == false)) {
+        LOG_F("Couldn't parse symbols whitelist file ('%s')", hfuzz.symbolsWhitelistFile);
     }
 #endif
 

@@ -101,6 +101,9 @@ typedef struct {
     const char *symbolsBlacklistFile;
     const char **symbolsBlacklist;
     size_t symbolsBlacklistCnt;
+    const char *symbolsWhitelistFile;
+    const char **symbolsWhitelist;
+    size_t symbolsWhitelistCnt;
     long tmOut;
     size_t dictionaryCnt;
     size_t mutationsMax;
