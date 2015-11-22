@@ -818,7 +818,7 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
              * saving multiple crashes while limiting their total number.
              */
             uint8_t id = (uint8_t) util_rndGet(0, 0xFF);
-            uint64_t mask = 0xBADBAD00 + id;
+            uint64_t mask = __HF_SF_MASK_CONST_BASE + id;
 
             /* Shift mask to most significant part of the stack hash */
             mask <<= 32;

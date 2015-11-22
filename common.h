@@ -53,6 +53,10 @@
 /* Number of crash verifier iterations before tag crash as stable */
 #define _HF_VERIFIER_ITER   5
 
+/* Constant prefix used for single unwinded frames masking */
+#define __HF_SF_MASK_CONST      0xBADBAD0000000000
+#define __HF_SF_MASK_CONST_BASE 0xBADBAD00
+
 typedef enum {
     _HF_DYNFILE_NONE = 0x0,
     _HF_DYNFILE_INSTR_COUNT = 0x1,
