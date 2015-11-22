@@ -819,12 +819,12 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
              */
             /* Save up to 10 whitelist cases */
             uint8_t id = (uint8_t)util_rndGet(0, 9);
-            uint64_t mask = 0xAAAAA00 + id;
+            uint64_t mask = 0xAAAAAA0 + id;
 
             /* Shift mask to most significant part of the stack hash */
-            mask <<= 8;
+            mask <<= 32;
             fuzzer->backtrace = fuzzer->backtrace | mask;
-            
+
             LOG_I("Whitelisted symbol '%s' found, skipping blackilist checks", wlSymbol);
             goto saveCrash;
         }
