@@ -333,9 +333,19 @@ static bool fuzz_runSimplifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
         goto bail;
     }
 
-    origBuf = files_mapFile(crashedFuzzer->origFileName, &origFileSz, &origFd, false);
+    char realOrigFile[PATH_MAX] = { 0 };
+
+    if (hfuzz->fileCnt == 1) {
+        /* Single file corpus */
+        snprintf(realOrigFile, sizeof(realOrigFile), "%s", hfuzz->inputFile);
+    } else {
+        /* Directory with seed files */
+        snprintf(realOrigFile, sizeof(realOrigFile), "%s/%s", hfuzz->inputFile,
+                 crashedFuzzer->origFileName);
+    }
+    origBuf = files_mapFile(realOrigFile, &origFileSz, &origFd, false);
     if (crashBuf == NULL) {
-        LOG_E("Couldn't open and map '%s' in R/O mode", crashedFuzzer->origFileName);
+        LOG_E("Couldn't open and map '%s' in R/O mode", realOrigFile);
         goto bail;
     }
 
@@ -365,10 +375,10 @@ static bool fuzz_runSimplifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
         }
 
         /* Check if large diff blob started (more then 4 bytes sequentially) */
-        if (curOff < iterCnt - 4 && 
-            origBuf[curOff+1] != crashBuf[curOff+1] &&
-            origBuf[curOff+2] != crashBuf[curOff+2] &&
-            origBuf[curOff+3] != crashBuf[curOff+3]) {
+        if (curOff < iterCnt - 4 &&
+            origBuf[curOff + 1] != crashBuf[curOff + 1] &&
+            origBuf[curOff + 2] != crashBuf[curOff + 2] &&
+            origBuf[curOff + 3] != crashBuf[curOff + 3]) {
             largeDiffBlob = true;
             continue;
         }
@@ -460,7 +470,8 @@ static bool fuzz_runSimplifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
         }
     }
 
-    LOG_D("'%s' has been successfully simplified (%zu bytes reverted)", crashedFuzzer->crashFileName, revertedBytes);
+    LOG_D("'%s' has been successfully simplified (%zu bytes reverted)",
+          crashedFuzzer->crashFileName, revertedBytes);
     ret = true;
 
  bail:
