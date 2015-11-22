@@ -172,11 +172,51 @@ size_t arch_unwindStack(pid_t pid, funcs_t * funcs)
 char *arch_btContainsBLSymbol(honggfuzz_t * hfuzz, size_t num_frames, funcs_t * funcs)
 {
     for (size_t frame = 0; frame < num_frames; frame++) {
-        for (size_t symbol = 0; symbol < hfuzz->symbolsBlacklistCnt; symbol++) {
-            if (strlen(funcs[frame].func) > 0 && strncmp
-                (funcs[frame].func, hfuzz->symbolsBlacklist[symbol],
-                 strlen(funcs[frame].func)) == 0) {
-                return funcs[frame].func;
+        size_t len = strlen(funcs[frame].func);
+
+        /* Try only for frames that have symbol name from backtrace */
+        if (strlen(funcs[frame].func) > 0) {
+
+            /* Not pretty, although assume list is usually target specific and thus small */
+            for (size_t symbol = 0; symbol < hfuzz->symbolsBlacklistCnt; symbol++) {
+
+                /* Wildcard case */
+                char *wOff = strchr(hfuzz->symbolsBlacklist[symbol], '*');
+                if (wOff) {
+                    /* Length checks are performed during input file parsing step */
+                    len = wOff - hfuzz->symbolsBlacklist[symbol] - 1;
+                }
+
+                if (strncmp(funcs[frame].func, hfuzz->symbolsBlacklist[symbol], len) == 0) {
+                    return funcs[frame].func;
+                }
+            }
+        }
+    }
+    return NULL;
+}
+
+char *arch_btContainsWLSymbol(honggfuzz_t * hfuzz, size_t num_frames, funcs_t * funcs)
+{
+    for (size_t frame = 0; frame < num_frames; frame++) {
+        size_t len = strlen(funcs[frame].func);
+
+        /* Try only for frames that have symbol name from backtrace */
+        if (strlen(funcs[frame].func) > 0) {
+
+            /* Not pretty, although assume list is usually target specific and thus small */
+            for (size_t symbol = 0; symbol < hfuzz->symbolsWhitelistCnt; symbol++) {
+
+                /* Wildcard case */
+                char *wOff = strchr(hfuzz->symbolsWhitelist[symbol], '*');
+                if (wOff) {
+                    /* Length checks are performed during input file parsing step */
+                    len = wOff - hfuzz->symbolsWhitelist[symbol] - 1;
+                }
+
+                if (strncmp(funcs[frame].func, hfuzz->symbolsWhitelist[symbol], len) == 0) {
+                    return funcs[frame].func;
+                }
             }
         }
     }

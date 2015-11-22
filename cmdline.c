@@ -162,6 +162,9 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         .symbolsBlacklistFile = NULL,
         .symbolsBlacklistCnt = 0,
         .symbolsBlacklist = NULL,
+        .symbolsWhitelistFile = NULL,
+        .symbolsWhitelistCnt = 0,
+        .symbolsWhitelist = NULL,
         .maxFileSz = (1024 * 1024),
         .tmOut = 3,
         .mutationsMax = 0,
@@ -221,6 +224,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         {{"wordlist", required_argument, NULL, 'w'}, "Wordlist file (tokens delimited by NUL-bytes)"},
 #if defined(_HF_ARCH_LINUX)
         {{"symbols_bl", required_argument, NULL, 'b'}, "Symbols blacklist file (one entry per line)"},
+        {{"symbols_wl", required_argument, NULL, 'A'}, "Symbols whitelist file (one entry per line)"},
 #endif
         {{"stackhash_bl", required_argument, NULL, 'B'}, "Stackhashes blacklist file (one entry per line)"},
         {{"mutate_cmd", required_argument, NULL, 'c'}, "External command modifying the input corpus of files, instead of -r/-m parameters"},
@@ -257,7 +261,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
     const char *logfile = NULL;
     int opt_index = 0;
     for (;;) {
-        int c = getopt_long(argc, argv, "-?hqvVsuf:d:e:W:r:c:F:t:R:n:N:l:p:g:E:w:B:b:", opts,
+        int c = getopt_long(argc, argv, "-?hqvVsuf:d:e:W:r:c:F:t:R:n:N:l:p:g:E:w:B:b:A:", opts,
                             &opt_index);
         if (c < 0)
             break;
@@ -345,6 +349,9 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
             break;
         case 'b':
             hfuzz->symbolsBlacklistFile = optarg;
+            break;
+        case 'A':
+            hfuzz->symbolsWhitelistFile = optarg;
             break;
         case 'B':
             hfuzz->blacklistFile = optarg;
