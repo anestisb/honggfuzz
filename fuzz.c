@@ -383,9 +383,19 @@ static bool fuzz_runSimplifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
         goto bail;
     }
 
-    origBuf = files_mapFile(crashedFuzzer->origFileName, &origFileSz, &origFd, false);
+    char realOrigFile[PATH_MAX] = { 0 };
+
+    if (hfuzz->fileCnt == 1) {
+        /* Single file corpus */
+        snprintf(realOrigFile, sizeof(realOrigFile), "%s", hfuzz->inputFile);
+    } else {
+        /* Directory with seed files */
+        snprintf(realOrigFile, sizeof(realOrigFile), "%s/%s", hfuzz->inputFile,
+                 crashedFuzzer->origFileName);
+    }
+    origBuf = files_mapFile(realOrigFile, &origFileSz, &origFd, false);
     if (crashBuf == NULL) {
-        LOG_E("Couldn't open and map '%s' in R/O mode", crashedFuzzer->origFileName);
+        LOG_E("Couldn't open and map '%s' in R/O mode", realOrigFile);
         goto bail;
     }
 
