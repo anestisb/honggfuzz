@@ -510,7 +510,7 @@ static bool fuzz_runSimplifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
         }
     }
 
-    LOG_D("'%s' has been successfully simplified (%u bytes reverted)", crashedFuzzer->crashFileName, revertedBytes);
+    LOG_D("'%s' has been successfully simplified (%zu bytes reverted)", crashedFuzzer->crashFileName, revertedBytes);
     ret = true;
 
  bail:
