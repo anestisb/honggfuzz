@@ -810,16 +810,15 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
      */
     if (hfuzz->symbolsWhitelist) {
         char *wlSymbol = arch_btContainsWLSymbol(hfuzz, funcCnt, funcs);
-        if (wlSymbol != NULL && hfuzz->saveUnique) {            
+        if (wlSymbol != NULL && hfuzz->saveUnique) {
             /* 
              * In order to enforce whitelist symbol crashes saving, stackhashes
              * need a prefix mask to avoid hitting identical crash name fingerprint.
-             * The mask is a simple magic number plus an a random ID from 0-9, allowing
-             * saving of up to 10 different crashes.
+             * The mask is a simple magic number plus an a random ID from 0-FF, allowing
+             * saving multiple crashes while limiting their total number.
              */
-            /* Save up to 10 whitelist cases */
-            uint8_t id = (uint8_t)util_rndGet(0, 9);
-            uint64_t mask = 0xAAAAAA0 + id;
+            uint8_t id = (uint8_t) util_rndGet(0, 0xFF);
+            uint64_t mask = 0xBADBAD00 + id;
 
             /* Shift mask to most significant part of the stack hash */
             mask <<= 32;
