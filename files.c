@@ -463,7 +463,7 @@ bool files_parseSymbolsBlacklist(honggfuzz_t * hfuzz)
     for (;;) {
         char *lineptr = NULL;
         size_t n = 0;
-        if (getdelim(&lineptr, &n, '\0', fSBl) == -1) {
+        if (getline(&lineptr, &n, fSBl) == -1) {
             break;
         }
 
@@ -507,7 +507,7 @@ bool files_parseSymbolsWhitelist(honggfuzz_t * hfuzz)
     for (;;) {
         char *lineptr = NULL;
         size_t n = 0;
-        if (getdelim(&lineptr, &n, '\0', fSWl) == -1) {
+        if (getline(&lineptr, &n, fSWl) == -1) {
             break;
         }
 

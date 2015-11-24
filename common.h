@@ -53,9 +53,8 @@
 /* Number of crash verifier iterations before tag crash as stable */
 #define _HF_VERIFIER_ITER   5
 
-/* Constant prefix used for single unwinded frames masking */
-#define __HF_SF_MASK_CONST      0xBADBAD0000000000
-#define __HF_SF_MASK_CONST_BASE 0xBADBAD00
+/* Constant prefix used for single frame crashes stackhash masking */
+#define __HF_SINGLE_FRAME_MASK  0xBADBAD0000000000
 
 typedef enum {
     _HF_DYNFILE_NONE = 0x0,
