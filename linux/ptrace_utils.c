@@ -826,25 +826,13 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
 
     /*
      * Check if backtrace contains whitelisted symbol. Whitelist overrides
-     * both stacktrace and symbol blacklist.
+     * both stackhash and symbol blacklist.
      */
     if (hfuzz->symbolsWhitelist) {
         char *wlSymbol = arch_btContainsWLSymbol(hfuzz, funcCnt, funcs);
-        if (wlSymbol != NULL && hfuzz->saveUnique) {
-            /* 
-             * In order to enforce whitelist symbol crashes saving, stackhashes
-             * need a prefix mask to avoid hitting identical crash name fingerprint.
-             * The mask is a simple magic number plus an a random ID from 0-FF, allowing
-             * saving multiple crashes while limiting their total number.
-             */
-            uint8_t id = (uint8_t) util_rndGet(0, 0xFF);
-            uint64_t mask = __HF_SF_MASK_CONST_BASE + id;
-
-            /* Shift mask to most significant part of the stack hash */
-            mask <<= 32;
-            fuzzer->backtrace = fuzzer->backtrace | mask;
-
-            LOG_I("Whitelisted symbol '%s' found, skipping blackilist checks", wlSymbol);
+        if (wlSymbol != NULL) {
+            saveUnique = false;
+            LOG_I("Whitelisted symbol '%s' found, skipping blacklist checks", wlSymbol);
             goto saveCrash;
         }
     }
