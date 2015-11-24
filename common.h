@@ -62,9 +62,8 @@
 /* Maximum number of diff bytes to try reverting - skipping continus diff blobs */
 #define __HF_ABORT_SIMPLIFIER_MAX_DIFF 30
 
-/* Constant prefix used for single unwinded frames masking */
-#define __HF_SF_MASK_CONST      0xBADBAD0000000000
-#define __HF_SF_MASK_CONST_BASE 0xBADBAD00
+/* Constant prefix used for single frame crashes stackhash masking */
+#define __HF_SINGLE_FRAME_MASK  0xBADBAD0000000000
 
 /*
  * Percentage (against total crashes) after which uniqueness flag is disabled due
@@ -136,7 +135,6 @@ typedef struct {
 
     time_t timeStart;
     size_t mutationsCnt;
-    size_t singleFrameCrashesCnt;
     size_t crashesCnt;
     size_t uniqueCrashesCnt;
     size_t verifiedCrashesCnt;
