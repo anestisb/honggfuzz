@@ -35,8 +35,8 @@
 #include "log.h"
 #include "util.h"
 
-static void mangle_Overwrite(uint8_t * dst, const uint8_t * src, size_t dstSz, size_t off,
-                             size_t sz)
+static inline void mangle_Overwrite(uint8_t * dst, const uint8_t * src, size_t dstSz, size_t off,
+                                    size_t sz)
 {
     size_t maxToCopy = dstSz - off;
     if (sz > maxToCopy) {
@@ -103,9 +103,9 @@ static void mangle_Magic(honggfuzz_t * hfuzz, uint8_t * buf, size_t bufSz, size_
 {
     /*  *INDENT-OFF* */
     static const struct {
-        const uint8_t val[8];
+        const uint8_t const val[8];
         const size_t size;
-    } mangleMagicVals[] = {
+    } const mangleMagicVals[] = {
         /* 1B - No endianness */
         { "\x00\x00\x00\x00\x00\x00\x00\x00", 1},
         { "\x01\x00\x00\x00\x00\x00\x00\x00", 1},
@@ -324,7 +324,7 @@ static void mangle_DecByte(honggfuzz_t * hfuzz, uint8_t * buf, size_t bufSz, siz
 void mangle_mangleContent(honggfuzz_t * hfuzz, uint8_t * buf, size_t bufSz)
 {
     /*  *INDENT-OFF* */
-    void (*const mangleFuncs[]) (honggfuzz_t * hfuzz, uint8_t * buf, size_t bufSz, size_t off) = {
+    static void (*const mangleFuncs[]) (honggfuzz_t * hfuzz, uint8_t * buf, size_t bufSz, size_t off) = {
         mangle_Byte,
         mangle_Byte,
         mangle_Byte,

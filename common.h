@@ -62,6 +62,9 @@
 /* Maximum number of diff bytes to try reverting - skipping continus diff blobs */
 #define __HF_ABORT_SIMPLIFIER_MAX_DIFF 30
 
+/* Constant prefix used for single frame crashes stackhash masking */
+#define __HF_SINGLE_FRAME_MASK  0xBADBAD0000000000
+
 typedef enum {
     _HF_DYNFILE_NONE = 0x0,
     _HF_DYNFILE_INSTR_COUNT = 0x1,
