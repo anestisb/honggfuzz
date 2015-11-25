@@ -145,6 +145,13 @@ struct user_regs_struct_64 {
 #endif                          /* defined(__i386__) || defined(__x86_64__) */
 
 #if defined(__arm__) || defined(__aarch64__)
+#ifndef ARM_lr
+#ifdef __ANDROID__              /* Building with NDK headers */
+#define ARM_lr uregs[14]
+#else                           /* Building with glibc headers */
+#define ARM_lr 14
+#endif
+#endif                          /* ARM_lr */
 #ifndef ARM_pc
 #ifdef __ANDROID__              /* Building with NDK headers */
 #define ARM_pc uregs[15]
@@ -572,6 +579,67 @@ static size_t arch_getPC(pid_t pid, REG_TYPE * pc, REG_TYPE * status_reg)
     return 0;
 }
 
+#if defined(__arm__) || defined(__aarch64__)
+static size_t arch_getLR(pid_t pid, REG_TYPE * lr)
+{
+    /* 
+     * Some old ARM android kernels are failing with PTRACE_GETREGS to extract
+     * the correct register values if struct size is bigger than expected. As such the
+     * 32/64-bit multiplexing trick is not working for them in case PTRACE_GETREGSET
+     * fails or is not implemented. To cover such cases we explicitly define
+     * the struct size to 32bit version for arm CPU.
+     */
+#if defined(__arm__)
+    struct user_regs_struct_32 regs;
+#else
+    HEADERS_STRUCT regs;
+#endif
+    struct iovec pt_iov = {
+        .iov_base = &regs,
+        .iov_len = sizeof(regs),
+    };
+
+    if (ptrace(PTRACE_GETREGSET, pid, NT_PRSTATUS, &pt_iov) == -1L) {
+        PLOG_D("ptrace(PTRACE_GETREGSET) failed");
+
+        /* If PTRACE_GETREGSET fails, try PTRACE_GETREGS if available */
+#if PTRACE_GETREGS_AVAILABLE
+        if (ptrace(PTRACE_GETREGS, pid, 0, &regs)) {
+            PLOG_D("ptrace(PTRACE_GETREGS) failed");
+            LOG_W("ptrace PTRACE_GETREGSET & PTRACE_GETREGS failed to extract target registers");
+            return 0;
+        }
+#else
+        return 0;
+#endif
+    }
+
+    /*
+     * 32-bit
+     */
+    if (pt_iov.iov_len == sizeof(struct user_regs_struct_32)) {
+        struct user_regs_struct_32 *r32 = (struct user_regs_struct_32 *)&regs;
+#ifdef __ANDROID__
+        *lr = r32->ARM_lr;
+#else
+        *lr = r32->uregs[ARM_lr];
+#endif
+        return pt_iov.iov_len;
+    }
+
+    /*
+     * 64-bit
+     */
+    if (pt_iov.iov_len == sizeof(struct user_regs_struct_64)) {
+        struct user_regs_struct_64 *r64 = (struct user_regs_struct_64 *)&regs;
+        *lr = r64->regs[30];
+        return pt_iov.iov_len;
+    }
+    LOG_W("Unknown registers structure size: '%zd'", pt_iov.iov_len);
+    return 0;
+}
+#endif
+
 static void arch_getInstrStr(pid_t pid, REG_TYPE * pc, char *instr)
 {
     /*
@@ -741,6 +809,26 @@ static void arch_ptraceAnalyzeData(pid_t pid, fuzzer_t * fuzzer)
      * Calculate backtrace callstack hash signature
      */
     arch_hashCallstack(fuzzer, funcs, funcCnt, false);
+
+    /* 
+     * Special handling for single frame crashes. If ARM/ARM64 CPU link register
+     * is also included into callstack hash aiming to filter duplicates.
+     */
+#if defined(__arm__) || defined(__aarch64__)
+    if (funcCnt == 1) {
+        /* Get link register */
+        REG_TYPE lr = 0;
+        if (!arch_getLR(pid, &lr)) {
+            LOG_W("Failed to get link register");
+            return;
+        }
+
+        /* Convert to string & add to hash the last three nibbles */
+        char lrStr[REGSIZEINCHAR] = { 0 };
+        snprintf(lrStr, REGSIZEINCHAR, REG_PD REG_PM, (REG_TYPE) (long)lr);
+        fuzzer->backtrace ^= util_hash(&lrStr[strlen(lrStr) - 3], 3);
+    }
+#endif
 }
 
 static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzzer)
@@ -797,12 +885,29 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
      */
     arch_hashCallstack(fuzzer, funcs, funcCnt, saveUnique);
 
-    /* 
-     * If unique flag is set and single frame crash, disable uniqueness for this crash 
-     * to always save (timestamp will be added to the filename)
+    /* Special handling for single frame crashes. For non ARM targets, disable
+     * uniqueness for this crash to always save (timestamp will be added to 
+     * the filename). If ARM/ARM64 CPU link register is also included into
+     * callstack hash aiming to filter duplicates.
      */
     if (saveUnique && (funcCnt == 1)) {
+#if defined(__arm__) || defined(__aarch64__)
+        /* Get link register */
+        REG_TYPE lr = 0;
+        if (!arch_getLR(pid, &lr)) {
+            LOG_W("Failed to get link register");
+
+            /* In case of error disable unique flag for this case too */
+            saveUnique = false;
+        }
+
+        /* Convert to string & add to hash the last three nibbles */
+        char lrStr[REGSIZEINCHAR] = { 0 };
+        snprintf(lrStr, REGSIZEINCHAR, REG_PD REG_PM, (REG_TYPE) (long)lr);
+        fuzzer->backtrace ^= util_hash(&lrStr[strlen(lrStr) - 3], 3);
+#else
         saveUnique = false;
+#endif
     }
 
     /* 
