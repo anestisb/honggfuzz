@@ -895,7 +895,7 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
 #if defined(__arm__) || defined(__aarch64__)
         /* Get link register */
         REG_TYPE lr = 0;
-        if (!arch_getLR(pid, &lr)) {
+        if (!arch_getLR(pid, &lr) || lr == 0) {
             LOG_W("Failed to get link register");
 
             /* In case of error disable unique flag for this case too */
