@@ -667,7 +667,7 @@ static void fuzz_fuzzLoop(honggfuzz_t * hfuzz)
         }
     }
 
-    if (hfuzz->useSimplifier && (fuzzer.crashFileName[0] != 0)) {
+    if (hfuzz->useSimplifier && (fuzzer.crashFileName[0] != 0) && fuzzer.backtrace) {
         if (!fuzz_runSimplifier(hfuzz, &fuzzer)) {
             LOG_I("Failed to simplify %s", fuzzer.crashFileName);
         }
