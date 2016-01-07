@@ -362,8 +362,20 @@ struct {
     [SIGBUS].important = true,
     [SIGBUS].descr = "SIGBUS",
 
+#if defined(__ANDROID__)
+    [SIGABRT].important = false,
+#else
     [SIGABRT].important = true,
-    [SIGABRT].descr = "SIGABRT"
+#endif
+    [SIGABRT].descr = "SIGABRT",
+    
+#if defined(__ANDROID__)
+    [_HF_ANDROID_ASAN_EXIT_SIG].important = true,
+    [_HF_ANDROID_ASAN_EXIT_SIG].descr = "SIGASAN"
+#else
+    [_HF_ANDROID_ASAN_EXIT_SIG].important = false,
+    [_HF_ANDROID_ASAN_EXIT_SIG].descr = ""
+#endif
 };
 /*  *INDENT-ON* */
 
@@ -917,6 +929,14 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
      */
     arch_hashCallstack(fuzzer, funcs, funcCnt, saveUnique);
 
+    /*
+     * If fuzzing with sanitizer coverage feedback increase crashes counter used
+     * as metric for dynFile evolution
+     */
+    if (hfuzz->useSanCov) {
+        fuzzer->sanCovCnts.crashesCnt++;
+    }
+
     /* Special handling for single frame crashes. For non ARM targets, disable
      * uniqueness for this crash to always save (timestamp will be added to 
      * the filename). If ARM/ARM64 CPU link register is also included into
@@ -962,9 +982,6 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
     /* Increase global crashes counter */
     __sync_fetch_and_add(&hfuzz->crashesCnt, 1UL);
 
-    /* If crash detected, zero set two MSB */
-    __sync_fetch_and_and(&hfuzz->dynFileIterExpire, _HF_DYNFILE_SUB_MASK);
-
     /*
      * Check if backtrace contains whitelisted symbol. Whitelist overrides
      * both stackhash and symbol blacklist.
@@ -1001,6 +1018,9 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
     }
 
  saveCrash:
+    /* If non-blacklisted crash detected, zero set two MSB */
+    __sync_fetch_and_and(&hfuzz->dynFileIterExpire, _HF_DYNFILE_SUB_MASK);
+
     if (hfuzz->disableRandomization == false) {
         pc = 0UL;
         sig_addr = NULL;

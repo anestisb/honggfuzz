@@ -51,11 +51,18 @@
 #include "linux/sancov.h"
 #include "log.h"
 #include "util.h"
+#include "files.h"
 
+#if defined(__ANDROID__)
+#define XSTR(x)         #x
+#define STR(x)          XSTR(x)
+#define kASAN_ABORT     ":abort_on_error=0:exitcode=" STR(_HF_ANDROID_ASAN_EXIT_SIG)
+#else
+#define kASAN_ABORT     ":abort_on_error=1"
+#endif
 #define kASAN_OPTS      "allow_user_segv_handler=1:"\
                         "handle_segv=0:"\
-                        "abort_on_error=1:"\
-                        "allocator_may_return_null=1"
+                        "allocator_may_return_null=1"kASAN_ABORT
 #define kMSAN_OPTS      "exit_code=" HF_MSAN_EXIT_CODE_STR ":"\
                         "wrap_signals=0:print_stats=1:report_umrs=0"
 #define kMSAN_OPTS_UMRS "exit_code=" HF_MSAN_EXIT_CODE_STR ":"\
@@ -114,8 +121,8 @@ bool arch_launchChild(honggfuzz_t * hfuzz, char *fileName)
     /* AddressSanitizer (ASan) */
     const char *asan_options = kASAN_OPTS;
     if (hfuzz->useSanCov) {
-        snprintf(sancov_opts, sizeof(sancov_opts), "%s:%s:%s%s", kASAN_OPTS, kSAN_COV_OPTS,
-                 kSANCOVDIR, hfuzz->workDir);
+        snprintf(sancov_opts, sizeof(sancov_opts), "%s:%s:%s%s/%s", kASAN_OPTS, kSAN_COV_OPTS,
+                 kSANCOVDIR, hfuzz->workDir, _HF_SANCOV_DIR);
         asan_options = sancov_opts;
     }
     if (setenv("ASAN_OPTIONS", asan_options, 1) == -1) {
@@ -362,7 +369,15 @@ void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
     }
     arch_removeTimer(&timerid);
     arch_perfAnalyze(hfuzz, fuzzer, &perfFds);
+#ifdef _HF_DEBUG
+    _HF_START_TIMER
+#endif
     arch_sanCovAnalyze(hfuzz, fuzzer);
+#ifdef _HF_DEBUG
+    _HF_END_TIMER if (_HF_GET_TIME > hfuzz->maxSpentInSanCov) {
+        hfuzz->maxSpentInSanCov = _HF_GET_TIME;
+    }
+#endif
 }
 
 bool arch_archInit(honggfuzz_t * hfuzz)
@@ -415,6 +430,17 @@ bool arch_archInit(honggfuzz_t * hfuzz)
         return false;
     }
 #endif
+
+    /* If sanitizer coverage enabled init workspace subdir */
+    if (hfuzz->useSanCov) {
+        char sanCovOutDir[PATH_MAX] = { 0 };
+        snprintf(sanCovOutDir, sizeof(sanCovOutDir), "%s/%s", hfuzz->workDir, _HF_SANCOV_DIR);
+        if (!files_exists(sanCovOutDir)) {
+            if (mkdir(sanCovOutDir, S_IRWXU | S_IXGRP | S_IXOTH) != 0) {
+                PLOG_E("mkdir() '%s' failed", sanCovOutDir);
+            }
+        }
+    }
 
     return true;
 }
