@@ -217,6 +217,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         .clearCovMetadata = false,
         .dynFileIterExpire = _HF_MAX_DYNFILE_ITER,
         .sanCov_mutex = PTHREAD_MUTEX_INITIALIZER,
+        .workersBlock_mutex = PTHREAD_MUTEX_INITIALIZER,
 #ifdef _HF_DEBUG
         .maxSpentInSanCov = 0,
 #endif

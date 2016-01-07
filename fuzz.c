@@ -163,6 +163,14 @@ static bool fuzz_prepareFileDynamically(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, 
         /* Reset counter since new seed pick */
         __sync_fetch_and_and(&hfuzz->dynFileIterExpire, 0UL);
         fuzz_resetFeedbackCnts(hfuzz);
+
+        /* 
+         * In order to have accurate comparison base for coverage, first iteration
+         * of a new seed is executed without mangling. Also workersBlock_mutex mutex
+         * is maintain until execution is finished to ensure that other threads will
+         * work against the same coverage data vs. original seed.
+         */
+        fuzzer->isDynFileLocked = true;
     }
 
     if (hfuzz->dynamicFileBestSz > hfuzz->maxFileSz) {
@@ -175,6 +183,13 @@ static bool fuzz_prepareFileDynamically(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, 
 
     MX_UNLOCK(&hfuzz->dynamicFile_mutex);
 
+    /* true isDynFileLocked indicates first run for a new seed, so skip mangling & lock mutex */
+    MX_LOCK(&hfuzz->workersBlock_mutex);
+    if (fuzzer->isDynFileLocked) {
+        goto skipMangling;
+    }
+    MX_UNLOCK(&hfuzz->workersBlock_mutex);
+
     /* 
      * if flip rate is 0.0, early abort file mangling. This will leave perf counters
      * with values equal to dry runs against input corpus.
@@ -182,6 +197,7 @@ static bool fuzz_prepareFileDynamically(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, 
     if (hfuzz->flipRate == 0.0L) {
         goto skipMangling;
     }
+
     /* The first pass should be on an empty/initial file */
     if (fuzz_isPerfCntsSet(hfuzz) || fuzz_isSanCovCntsSet(hfuzz)) {
 
@@ -693,15 +709,13 @@ static void fuzz_sanCovFeedback(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 
         memcpy(hfuzz->dynamicFileBest, fuzzer->dynamicFile, fuzzer->dynamicFileSz);
 
-        if (fuzzer->sanCovCnts.hitPcCnt != fuzzer->sanCovCnts.newPcCnt) {
-            /* Don't update counter for first run of new seed */
-            hfuzz->sanCovCnts.newPcCnt += fuzzer->sanCovCnts.newPcCnt;
-        }
+
         hfuzz->dynamicFileBestSz = fuzzer->dynamicFileSz;
         hfuzz->sanCovCnts.hitPcCnt = fuzzer->sanCovCnts.hitPcCnt;
         hfuzz->sanCovCnts.dsoCnt = fuzzer->sanCovCnts.dsoCnt;
         hfuzz->sanCovCnts.iDsoCnt = fuzzer->sanCovCnts.iDsoCnt;
         hfuzz->sanCovCnts.crashesCnt += fuzzer->sanCovCnts.crashesCnt;
+        hfuzz->sanCovCnts.newPcCnt += fuzzer->sanCovCnts.newPcCnt;
 
         if (hfuzz->sanCovCnts.totalPcCnt < fuzzer->sanCovCnts.totalPcCnt) {
             /* Keep only the max value (for dlopen cases) to measure total target coverage */
@@ -752,7 +766,8 @@ static void fuzz_fuzzLoop(honggfuzz_t * hfuzz)
                        .crashesCnt = 0ULL,
                        },
         .report = {'\0'},
-        .mainWorker = true
+        .mainWorker = true,
+        .isDynFileLocked = false
     };
     if (fuzzer.dynamicFile == NULL) {
         LOG_F("malloc(%zu) failed", hfuzz->maxFileSz);
@@ -807,6 +822,14 @@ static void fuzz_fuzzLoop(honggfuzz_t * hfuzz)
         fuzz_perfFeedback(hfuzz, &fuzzer);
     } else if (hfuzz->useSanCov) {
         fuzz_sanCovFeedback(hfuzz, &fuzzer);
+    }
+
+    /* 
+     * If worker picked first iteration of new seed for dynFile, unlock the mutex
+     * so other threads can continue.
+     */
+    if (fuzzer.isDynFileLocked) {
+        MX_UNLOCK(&hfuzz->workersBlock_mutex);
     }
 
     if (hfuzz->useVerifier && (fuzzer.crashFileName[0] != 0) && fuzzer.backtrace) {
