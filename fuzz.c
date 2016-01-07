@@ -532,7 +532,8 @@ static bool fuzz_runSimplifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
                        .customCnt = 0ULL,
                        },
             .report = {'\0'},
-            .mainWorker = false
+            .mainWorker = false,
+            .isDynFileLocked = false
         };
 
         fuzz_getFileName(hfuzz, sFuzzer.fileName);
