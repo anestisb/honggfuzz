@@ -981,6 +981,7 @@ void fuzz_main(honggfuzz_t * hfuzz)
               strsignal(fuzz_sigReceived));
     }
 
+    /* Clean-up global buffers */
     free(hfuzz->files);
     free(hfuzz->dynamicFileBest);
     if (hfuzz->dictionary) {
@@ -991,6 +992,14 @@ void fuzz_main(honggfuzz_t * hfuzz)
     }
     if (hfuzz->symbolsBlacklist) {
         free(hfuzz->symbolsBlacklist);
+    if (hfuzz->sanOpts.asanOpts) {
+        free(hfuzz->sanOpts.asanOpts);
+    }
+    if (hfuzz->sanOpts.ubsanOpts) {
+        free(hfuzz->sanOpts.ubsanOpts);
+    }
+    if (hfuzz->sanOpts.msanOpts) {
+        free(hfuzz->sanOpts.msanOpts);
     }
 
     _exit(EXIT_SUCCESS);
