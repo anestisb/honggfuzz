@@ -992,6 +992,10 @@ void fuzz_main(honggfuzz_t * hfuzz)
     }
     if (hfuzz->symbolsBlacklist) {
         free(hfuzz->symbolsBlacklist);
+    }
+    if (hfuzz->symbolsWhitelist) {
+        free(hfuzz->symbolsWhitelist);
+    }
     if (hfuzz->sanOpts.asanOpts) {
         free(hfuzz->sanOpts.asanOpts);
     }
