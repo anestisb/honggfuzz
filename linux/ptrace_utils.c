@@ -762,7 +762,6 @@ static void arch_ptraceAnalyzeData(pid_t pid, fuzzer_t * fuzzer)
 static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzzer)
 {
     REG_TYPE pc = 0;
-    bool saveUnique = hfuzz->saveUnique;
 
     /* Local copy since flag is overridden for some crashes */
     bool saveUnique = hfuzz->saveUnique;
