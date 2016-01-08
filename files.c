@@ -540,9 +540,9 @@ bool files_parseSymbolsBlacklist(honggfuzz_t * hfuzz)
         return false;
     }
 
+    char *lineptr = NULL;
+    size_t n = 0;
     for (;;) {
-        char *lineptr = NULL;
-        size_t n = 0;
         if (getline(&lineptr, &n, fSBl) == -1) {
             break;
         }
@@ -551,6 +551,7 @@ bool files_parseSymbolsBlacklist(honggfuzz_t * hfuzz)
         if (strlen(lineptr) < 3) {
             LOG_F("Input symbol '%s' too short (strlen < 3)", lineptr);
             fclose(fSBl);
+            free(lineptr);
             return false;
         }
 
@@ -561,6 +562,7 @@ bool files_parseSymbolsBlacklist(honggfuzz_t * hfuzz)
             PLOG_E("Realloc failed (sz=%zu)",
                    (hfuzz->symbolsBlacklistCnt + 1) * sizeof(hfuzz->symbolsBlacklist[0]));
             fclose(fSBl);
+            free(lineptr);
             return false;
         }
         hfuzz->symbolsBlacklist[hfuzz->symbolsBlacklistCnt] = lineptr;
@@ -573,6 +575,7 @@ bool files_parseSymbolsBlacklist(honggfuzz_t * hfuzz)
         LOG_F("Empty symbols blacklist file '%s'", hfuzz->symbolsBlacklistFile);
     }
     fclose(fSBl);
+    free(lineptr);
     return true;
 }
 
@@ -584,9 +587,9 @@ bool files_parseSymbolsWhitelist(honggfuzz_t * hfuzz)
         return false;
     }
 
+    char *lineptr = NULL;
+    size_t n = 0;
     for (;;) {
-        char *lineptr = NULL;
-        size_t n = 0;
         if (getline(&lineptr, &n, fSWl) == -1) {
             break;
         }
@@ -595,6 +598,7 @@ bool files_parseSymbolsWhitelist(honggfuzz_t * hfuzz)
         if (strlen(lineptr) < 3) {
             LOG_F("Input symbol '%s' too short (strlen < 3)", lineptr);
             fclose(fSWl);
+            free(lineptr);
             return false;
         }
 
@@ -605,6 +609,7 @@ bool files_parseSymbolsWhitelist(honggfuzz_t * hfuzz)
             PLOG_E("Realloc failed (sz=%zu)",
                    (hfuzz->symbolsWhitelistCnt + 1) * sizeof(hfuzz->symbolsWhitelist[0]));
             fclose(fSWl);
+            free(lineptr);
             return false;
         }
         hfuzz->symbolsWhitelist[hfuzz->symbolsWhitelistCnt] = lineptr;
@@ -617,6 +622,7 @@ bool files_parseSymbolsWhitelist(honggfuzz_t * hfuzz)
         LOG_F("Empty symbols whitelist file '%s'", hfuzz->symbolsWhitelistFile);
     }
     fclose(fSWl);
+    free(lineptr);
     return true;
 }
 
