@@ -224,9 +224,6 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
                     .ubsanOpts = NULL,
         },
         .numMajorFrames = 7,
-#ifdef _HF_DEBUG
-        .maxSpentInSanCov = 0,
-#endif
     };
     /*  *INDENT-ON* */
 
