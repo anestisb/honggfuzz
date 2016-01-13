@@ -198,19 +198,18 @@ static bool fuzz_prepareFileDynamically(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, 
     if (hfuzz->flipRate == 0.0L) {
         goto skipMangling;
     }
-
 #if defined(EXTENSION_ENABLED) && defined(_HF_MANGLERESIZECALLBACK)
-        UserMangleResizeCallback(hfuzz, fuzzer->dynamicFile, &fuzzer->dynamicFileSz);
+    UserMangleResizeCallback(hfuzz, fuzzer->dynamicFile, &fuzzer->dynamicFileSz);
 #else
-        mangle_Resize(hfuzz, fuzzer->dynamicFile, &fuzzer->dynamicFileSz);
+    mangle_Resize(hfuzz, fuzzer->dynamicFile, &fuzzer->dynamicFileSz);
 #endif
 #if defined(EXTENSION_ENABLED) && defined(_HF_MANGLECALLBACK)
-        UserMangleCallback(hfuzz, fuzzer->dynamicFile, fuzzer->dynamicFileSz, rnd_index);
+    UserMangleCallback(hfuzz, fuzzer->dynamicFile, fuzzer->dynamicFileSz, rnd_index);
 #else
-        mangle_mangleContent(hfuzz, fuzzer->dynamicFile, fuzzer->dynamicFileSz);
+    mangle_mangleContent(hfuzz, fuzzer->dynamicFile, fuzzer->dynamicFileSz);
 #endif
 #if defined(EXTENSION_ENABLED) && defined(_HF_POSTMANGLECALLBACK)
-        UserPostMangleCallback(hfuzz, fuzzer->dynamicFile, fuzzer->dynamicFileSz);
+    UserPostMangleCallback(hfuzz, fuzzer->dynamicFile, fuzzer->dynamicFileSz);
 #endif
 
  skipMangling:
