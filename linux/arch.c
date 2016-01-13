@@ -58,6 +58,12 @@
 #define STR(x)          XSTR(x)
 
 /* Common sanitizer flags */
+#if _HF_MONITOR_SIGABRT
+#define ABORT_FLAG        "abort_on_error=1"
+#else
+#define ABORT_FLAG        "abort_on_error=0"
+#endif
+
 #if defined(__ANDROID__)
 /*
  * symbolize: Disable symbolication since it changes logs (which are parsed) format
@@ -65,9 +71,9 @@
  *                    target's DSOs are compiled with sanitizer enabled
  * abort_on_error: Disable for platforms where SIGABRT is not monitored
  */
-#define kSAN_COMMON_ARCH    "symbolize=0:abort_on_error=0:start_deactivated=1"
+#define kSAN_COMMON_ARCH    "symbolize=0:"ABORT_FLAG":start_deactivated=1"
 #else
-#define kSAN_COMMON_ARCH    "symbolize=0:abort_on_error=1"
+#define kSAN_COMMON_ARCH    "symbolize=0:"ABORT_FLAG
 #endif
 
 /* Sanitizer specific flags (set 'abort_on_error has priority over exitcode') */
@@ -429,12 +435,12 @@ bool arch_archInit(honggfuzz_t * hfuzz)
 #endif
 
     /* 
-     * If sanitizer coverage enabled increase number of major frames, since top 7-9 frames
+     * If sanitizer fuzzing enabled increase number of major frames, since top 7-9 frames
      * will be occupied with sanitizer symbols if 'abort_on_error' flag is set
      */
-    if (hfuzz->useSanCov) {
-        hfuzz->numMajorFrames = 14;
-    }
+#if _HF_MONITOR_SIGABRT
+    hfuzz->numMajorFrames = 14;
+#endif
 
     /* If sanitizer coverage enabled init workspace subdir */
     if (hfuzz->useSanCov) {
@@ -459,7 +465,7 @@ bool arch_archInit(honggfuzz_t * hfuzz)
     /* AddressSanitizer (ASan) */
     memset(san_opts, 0, bufSz);
     if (hfuzz->useSanCov) {
-#if defined(__ANDROID__)
+#if !_HF_MONITOR_SIGABRT
         /* Write reports in FS only if abort_on_error is disabled */
         snprintf(san_opts, bufSz, "%s:%s:%s%s/%s:%s%s/%s", kASAN_OPTS, kSAN_COV_OPTS,
                  kSANCOVDIR, hfuzz->workDir, _HF_SANCOV_DIR, kSANLOGDIR, hfuzz->workDir,
@@ -486,7 +492,7 @@ bool arch_archInit(honggfuzz_t * hfuzz)
     /* Undefined Behavior (UBSan) */
     memset(san_opts, 0, bufSz);
     if (hfuzz->useSanCov) {
-#if defined(__ANDROID__)
+#if !_HF_MONITOR_SIGABRT
         /* Write reports in FS only if abort_on_error is disabled */
         snprintf(san_opts, bufSz, "%s:%s:%s%s/%s:%s%s/%s", kUBSAN_OPTS, kSAN_COV_OPTS,
                  kSANCOVDIR, hfuzz->workDir, _HF_SANCOV_DIR, kSANLOGDIR, hfuzz->workDir,
@@ -519,7 +525,7 @@ bool arch_archInit(honggfuzz_t * hfuzz)
     }
 
     if (hfuzz->useSanCov) {
-#if defined(__ANDROID__)
+#if !_HF_MONITOR_SIGABRT
         /* Write reports in FS only if abort_on_error is disabled */
         snprintf(san_opts, bufSz, "%s:%s:%s:%s%s/%s:%s%s/%s", kMSAN_OPTS, msan_reports_flag,
                  kSAN_COV_OPTS, kSANCOVDIR, hfuzz->workDir, _HF_SANCOV_DIR, kSANLOGDIR,
