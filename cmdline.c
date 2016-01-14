@@ -218,6 +218,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
                     .ubsanOpts = NULL,
         },
         .numMajorFrames = 7,
+        .isDynFileLocked = false,
     };
     /*  *INDENT-ON* */
 
