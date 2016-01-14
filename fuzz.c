@@ -986,9 +986,15 @@ void fuzz_main(honggfuzz_t * hfuzz)
         free(hfuzz->blacklist);
     }
     if (hfuzz->symbolsBlacklist) {
+        for (size_t i = 0; i < hfuzz->symbolsBlacklistCnt; i++) {
+            free(hfuzz->symbolsBlacklist[i]);
+        }
         free(hfuzz->symbolsBlacklist);
     }
     if (hfuzz->symbolsWhitelist) {
+        for (size_t i = 0; i < hfuzz->symbolsWhitelistCnt; i++) {
+            free(hfuzz->symbolsWhitelist[i]);
+        }
         free(hfuzz->symbolsWhitelist);
     }
     if (hfuzz->sanOpts.asanOpts) {

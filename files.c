@@ -570,7 +570,14 @@ bool files_parseSymbolsBlacklist(honggfuzz_t * hfuzz)
             free(lineptr);
             return false;
         }
-        hfuzz->symbolsBlacklist[hfuzz->symbolsBlacklistCnt] = lineptr;
+        hfuzz->symbolsBlacklist[hfuzz->symbolsBlacklistCnt] = malloc(strlen(lineptr));
+        if (!hfuzz->symbolsBlacklist[hfuzz->symbolsBlacklistCnt]) {
+            PLOG_E("malloc(%zu) failed", strlen(lineptr));
+            fclose(fSBl);
+            free(lineptr);
+            return false;
+        }
+        strncpy(hfuzz->symbolsBlacklist[hfuzz->symbolsBlacklistCnt], lineptr, strlen(lineptr));
         hfuzz->symbolsBlacklistCnt += 1;
     }
 
@@ -617,7 +624,14 @@ bool files_parseSymbolsWhitelist(honggfuzz_t * hfuzz)
             free(lineptr);
             return false;
         }
-        hfuzz->symbolsWhitelist[hfuzz->symbolsWhitelistCnt] = lineptr;
+        hfuzz->symbolsWhitelist[hfuzz->symbolsWhitelistCnt] = malloc(strlen(lineptr));
+        if (!hfuzz->symbolsWhitelist[hfuzz->symbolsWhitelistCnt]) {
+            PLOG_E("malloc(%zu) failed", strlen(lineptr));
+            fclose(fSWl);
+            free(lineptr);
+            return false;
+        }
+        strncpy(hfuzz->symbolsWhitelist[hfuzz->symbolsWhitelistCnt], lineptr, strlen(lineptr));
         hfuzz->symbolsWhitelistCnt += 1;
     }
 
