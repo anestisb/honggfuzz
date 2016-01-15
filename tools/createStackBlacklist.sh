@@ -31,6 +31,7 @@ cat <<_EOF
       -B|--bl-file : output file to save found hashes (merge if exists)
       -e|--ext     : file extension of fuzzer files (e.g. fuzz)
       -a|--arch    : arch fuzzer have run against ('MAC' or 'LINUX')
+      -s|--skip    : Disable 'BADBAD' prefixed hashes skipping
 
     INFO:
       * Blacklist file sort mode only requires [-B/--bl-file] argument
@@ -56,9 +57,10 @@ INPUT_DIR=""
 BL_FILE=""
 FILE_EXT=""
 ARCH=""
+SKIP_BAD=true
 
 nArgs=$#
-while [[ $# > 1 ]]
+while [[ $# > 0 ]]
 do
   arg="$1"
   case $arg in
@@ -77,6 +79,9 @@ do
     -a|--arch)
       ARCH="$2"
       shift
+      ;;
+    -s|--no-skip)
+      SKIP_BAD=false
       ;;
     *)
       echo "[-] Invalid argument '$1'"
@@ -132,7 +137,9 @@ fi
 
 if $gatherMode; then
   echo "[*] Processing files from '$INPUT_DIR' ..."
-  find $INPUT_DIR -type f -iname "*.$FILE_EXT" | while read -r FILE
+  find $INPUT_DIR -type f -iname "*.$FILE_EXT" \
+       -o -name "*.$FILE_EXT.verified" \
+       -o -name "*.$FILE_EXT*.min" | while read -r FILE
   do
     fileName=$(basename $FILE)
     if ! echo $fileName | grep -qF ".STACK."; then
@@ -142,7 +149,10 @@ if $gatherMode; then
     stackHash=$(echo $fileName | cut -d '.' -f$STACKHASH_FIELD)
 
     # We don't want to lose crashes where unwinder failed
-    if [[ "$stackHash" != "0" && ! "$stackHash" =~ ^badbad.* ]]; then
+    if [[ "$stackHash" != "0" ]]; then
+      if [[ "$SKIP_BAD" = true && "$stackHash" =~ ^badbad.* ]]; then
+        echo "[!] Skipping '$FILE' due to filtered hash ($stackHash)"
+      fi
       echo $stackHash >> $tmpFile
     fi
   done

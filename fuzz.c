@@ -393,7 +393,7 @@ static bool fuzz_runSimplifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
     uint8_t *origBuf = NULL, *crashBuf = NULL;
     off_t origFileSz = 0, crashFileSz = 0;
     size_t diffBytesCnt = 0, revertedBytes = 0, curOff = 0, iterCnt = 0;
-    bool largeDiffBlob = false;
+    bool isPartial = false;
 
     crashBuf = files_mapFile(crashedFuzzer->crashFileName, &crashFileSz, &crashFd, true);
     if (crashBuf == NULL) {
@@ -432,30 +432,7 @@ static bool fuzz_runSimplifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
     LOG_D("Launching simplifier for %s", crashedFuzzer->crashFileName);
     for (; curOff < iterCnt; curOff++) {
         if (origBuf[curOff] == crashBuf[curOff]) {
-            /* Reset large diff blob */
-            largeDiffBlob = false;
             continue;
-        }
-
-        /* If insider largeDiffBlob skip everything until hit first non-diff offset */
-        if (largeDiffBlob) {
-            continue;
-        }
-
-        /* Check if large diff blob started (more then 4 bytes sequentially) */
-        if (curOff < iterCnt - 4 &&
-            origBuf[curOff + 1] != crashBuf[curOff + 1] &&
-            origBuf[curOff + 2] != crashBuf[curOff + 2] &&
-            origBuf[curOff + 3] != crashBuf[curOff + 3]) {
-            largeDiffBlob = true;
-            continue;
-        }
-
-        /* Verify that changes fit into sane ranges */
-        diffBytesCnt++;
-        if (diffBytesCnt > __HF_ABORT_SIMPLIFIER_MAX_DIFF) {
-            LOG_E("Simplifier hit maximum diff tries, aborting");
-            goto bail;
         }
 
         /* Revert change */
@@ -512,6 +489,14 @@ static bool fuzz_runSimplifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
         } else {
             revertedBytes++;
         }
+
+        /* Verify that changes fit into sane ranges */
+        diffBytesCnt++;
+        if (diffBytesCnt > __HF_ABORT_SIMPLIFIER_MAX_DIFF) {
+            LOG_W("Simplifier hit maximum diff tries, saving current changes and aborting");
+            isPartial = true;
+            break;
+        }
     }
 
     /* Nothing to write if all tries failed */
@@ -522,24 +507,20 @@ static bool fuzz_runSimplifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
 
     /* Workspace is inherited, just append a extra suffix */
     char sFile[PATH_MAX] = { 0 };
-    snprintf(sFile, sizeof(sFile), "%s.simplified", crashedFuzzer->crashFileName);
-
-    /* Copy file with new suffix & remove original copy */
-    bool dstFileExists = false;
-    if (files_copyFile(crashedFuzzer->crashFileName, sFile, &dstFileExists)) {
-        LOG_I("Successfully simplified, saving as (%s)", sFile);
-        unlink(crashedFuzzer->crashFileName);
+    if (isPartial) {
+        snprintf(sFile, sizeof(sFile), "%s.part.min", crashedFuzzer->crashFileName);
     } else {
-        if (dstFileExists) {
-            LOG_I("It seems that '%s' already exists, skipping", sFile);
-        } else {
-            LOG_E("Couldn't copy '%s' to '%s'", crashedFuzzer->crashFileName, sFile);
-            goto bail;
-        }
+        snprintf(sFile, sizeof(sFile), "%s.min", crashedFuzzer->crashFileName);
     }
 
-    LOG_D("'%s' has been successfully simplified (%zu bytes reverted)",
-          crashedFuzzer->crashFileName, revertedBytes);
+    if (files_writeBufToFile(sFile, crashBuf, crashFileSz, O_WRONLY | O_CREAT | O_EXCL) == false) {
+        LOG_E("Couldn't write buffer to file '%s'", sFile);
+        goto bail;
+    }
+
+    LOG_I("'%s' successfully simplified (%zu bytes reverted) - saving as '%s'",
+          crashedFuzzer->crashFileName, revertedBytes, sFile);
+    unlink(crashedFuzzer->crashFileName);
     ret = true;
 
  bail:
