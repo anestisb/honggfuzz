@@ -466,7 +466,7 @@ static bool fuzz_runSimplifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
 
     /* Calculate iterations counter */
     if (origFileSz != crashFileSz) {
-#if __HF_ABORT_SIMPLIFIER_ON_SIZ_MISMATCH
+#if _HF_ABORT_SIMPLIFIER_ON_SIZ_MISMATCH
         LOG_E("Simplifier size mismatch abort is enabled");
         goto bail;
 #else
@@ -539,7 +539,7 @@ static bool fuzz_runSimplifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
 
         /* Verify that changes fit into sane ranges */
         diffBytesCnt++;
-        if (diffBytesCnt > __HF_ABORT_SIMPLIFIER_MAX_DIFF) {
+        if (diffBytesCnt > _HF_ABORT_SIMPLIFIER_MAX_DIFF) {
             LOG_W("Simplifier hit maximum diff tries, saving current changes and aborting");
             isPartial = true;
             break;
