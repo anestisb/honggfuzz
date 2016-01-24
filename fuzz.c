@@ -537,6 +537,7 @@ static bool fuzz_runSimplifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
         close(origFd);
     }
     return ret;
+}
 
 static void fuzz_perfFeedback(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 {
