@@ -31,6 +31,10 @@
 #include <sys/param.h>
 #include <sys/types.h>
 
+#ifdef __clang__
+#include <stdatomic.h>
+#endif
+
 #ifndef UNUSED
 #define UNUSED __attribute__((unused))
 #endif
