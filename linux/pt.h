@@ -1,11 +1,11 @@
 /*
  *
- * honggfuzz - architecture dependent code (LINUX/PERF)
+ * honggfuzz - Intel PT decoder
  * -----------------------------------------
  *
  * Author: Robert Swiecki <swiecki@google.com>
  *
- * Copyright 2010-2015 by Google Inc. All Rights Reserved.
+ * Copyright 2010-2016 by Google Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -21,21 +21,11 @@
  *
  */
 
-#ifndef _LINUX_PERF_H_
-#define _LINUX_PERF_H_
+#ifndef _LINUX_PT_H_
+#define _LINUX_PT_H_
 
-typedef struct {
-    int cpuInstrFd;
-    int cpuBranchFd;
-    int cpuBtsBlockFd;
-    int cpuBtsEdgeFd;
-    int cpuIptBlockFd;
-    int cpuIptEdgeFd;
-} perfFd_t;
+#include <linux/perf_event.h>
 
-extern bool arch_perfEnable(pid_t pid, honggfuzz_t * hfuzz, perfFd_t * perfFds);
-extern void arch_perfAnalyze(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, perfFd_t * perfFds);
-extern void arch_perfPoll(int perfFd);
-extern bool arch_perfInit(honggfuzz_t * hfuzz);
+extern void arch_ptAnalyze(struct perf_event_mmap_page *pem, uint8_t * auxBuf);
 
-#endif
+#endif                          /* _HF_LINUX_INTEL_PT_LIB */

@@ -76,7 +76,7 @@
 #define _HF_DYNFILE_SUB_MASK 0xFFFUL    // Zero-set two MSB
 
 /* Bitmap size */
-#define _HF_BITMAP_SIZE 0xAFFFFF
+#define _HF_BITMAP_SIZE 0x2AFFFFF
 
 /* Directory in workspace to store sanitizer coverage data */
 #define _HF_SANCOV_DIR "HF_SANCOV"
@@ -91,16 +91,20 @@ typedef enum {
     _HF_DYNFILE_NONE = 0x0,
     _HF_DYNFILE_INSTR_COUNT = 0x1,
     _HF_DYNFILE_BRANCH_COUNT = 0x2,
-    _HF_DYNFILE_UNIQUE_BLOCK_COUNT = 0x8,
-    _HF_DYNFILE_UNIQUE_EDGE_COUNT = 0x10,
-    _HF_DYNFILE_CUSTOM = 0x20,
+    _HF_DYNFILE_BTS_BLOCK = 0x8,
+    _HF_DYNFILE_BTS_EDGE = 0x10,
+    _HF_DYNFILE_IPT_BLOCK = 0x20,
+    _HF_DYNFILE_IPT_EDGE = 0x40,
+    _HF_DYNFILE_CUSTOM = 0x80,
 } dynFileMethod_t;
 
 typedef struct {
     uint64_t cpuInstrCnt;
     uint64_t cpuBranchCnt;
-    uint64_t pcCnt;
-    uint64_t pathCnt;
+    uint64_t cpuBtsBlockCnt;
+    uint64_t cpuBtsEdgeCnt;
+    uint64_t cpuIptBlockCnt;
+    uint64_t cpuIptEdgeCnt;
     uint64_t customCnt;
 } hwcnt_t;
 
