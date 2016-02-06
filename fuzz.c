@@ -499,8 +499,8 @@ static bool fuzz_runSimplifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
             .hwCnts = {
                        .cpuInstrCnt = 0ULL,
                        .cpuBranchCnt = 0ULL,
-                       .pcCnt = 0ULL,
-                       .pathCnt = 0ULL,
+                       .cpuBtsBlockCnt = 0ULL,
+                       .cpuBtsEdgeCnt = 0ULL,
                        .customCnt = 0ULL,
                        },
             .report = {'\0'},
