@@ -129,13 +129,21 @@ static void display_displayLocked(honggfuzz_t * hfuzz)
         display_put("  - cpu branches:          " ESC_BOLD "%" PRIu64 ESC_RESET "\n",
                     __sync_fetch_and_add(&hfuzz->hwCnts.cpuBranchCnt, 0UL));
     }
-    if (hfuzz->dynFileMethod & _HF_DYNFILE_UNIQUE_BLOCK_COUNT) {
-        display_put("  - unique branch targets: " ESC_BOLD "%" PRIu64 ESC_RESET "\n",
-                    __sync_fetch_and_add(&hfuzz->hwCnts.pcCnt, 0UL));
+    if (hfuzz->dynFileMethod & _HF_DYNFILE_BTS_BLOCK) {
+        display_put("  - BTS unique blocks: " ESC_BOLD "%" PRIu64 ESC_RESET "\n",
+                    __sync_fetch_and_add(&hfuzz->hwCnts.cpuBtsBlockCnt, 0UL));
     }
-    if (hfuzz->dynFileMethod & _HF_DYNFILE_UNIQUE_EDGE_COUNT) {
-        display_put("  - unique branch pairs:   " ESC_BOLD "%" PRIu64 ESC_RESET "\n",
-                    __sync_fetch_and_add(&hfuzz->hwCnts.pathCnt, 0UL));
+    if (hfuzz->dynFileMethod & _HF_DYNFILE_BTS_EDGE) {
+        display_put("  - BTS unique edges:   " ESC_BOLD "%" PRIu64 ESC_RESET "\n",
+                    __sync_fetch_and_add(&hfuzz->hwCnts.cpuBtsEdgeCnt, 0UL));
+    }
+    if (hfuzz->dynFileMethod & _HF_DYNFILE_IPT_BLOCK) {
+        display_put("  - PT unique blocks: " ESC_BOLD "%" PRIu64 ESC_RESET "\n",
+                    __sync_fetch_and_add(&hfuzz->hwCnts.cpuIptBlockCnt, 0UL));
+    }
+    if (hfuzz->dynFileMethod & _HF_DYNFILE_IPT_EDGE) {
+        display_put("  - PT unique edges:   " ESC_BOLD "%" PRIu64 ESC_RESET "\n",
+                    __sync_fetch_and_add(&hfuzz->hwCnts.cpuIptEdgeCnt, 0UL));
     }
     if (hfuzz->dynFileMethod & _HF_DYNFILE_CUSTOM) {
         display_put("  - custom counter:        " ESC_BOLD "%" PRIu64 ESC_RESET "\n",
