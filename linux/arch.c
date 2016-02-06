@@ -309,6 +309,11 @@ static void arch_checkTimeLimit(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 
 void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 {
+    /* 
+     * TODO: Add support to monitor both spawned execves & remote process. Very useful
+     * when fuzzing targets that involve IPC with system daemons & want to monitor
+     * crashes at both ends.
+     */
     pid_t ptracePid = (hfuzz->pid > 0) ? hfuzz->pid : fuzzer->pid;
     pid_t childPid = fuzzer->pid;
 
@@ -334,7 +339,25 @@ void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
     }
     /* A long-lived processed could have already exited, and we wouldn't know */
     if (kill(ptracePid, 0) == -1) {
-        PLOG_F("Liveness of %d questioned", ptracePid);
+        if (hfuzz->pidFile) {
+            /* If pid from file, check again for cases of auto-restart daemons that update it */
+            /* 
+             * TODO: Investigate if we need to delay here, so that target process has
+             * enough time to restart. Tricky to answer since is target dependant.
+             */
+            if (files_readPidFromFile(hfuzz->pidFile, &hfuzz->pid) == false) {
+                LOG_F("Failed to read new PID from file - abort");
+            } else {
+                if (kill(hfuzz->pid, 0) == -1) {
+                    PLOG_F("Liveness of PID %d read from file questioned - abort", hfuzz->pid);
+                } else {
+                    LOG_D("Monitor PID has been updated (pid=%d)", hfuzz->pid);
+                    ptracePid = hfuzz->pid;
+                }
+            }
+        } else {
+            PLOG_F("Liveness of %d questioned - abort", ptracePid);
+        }
     }
 
     perfFd_t perfFds;
@@ -390,13 +413,13 @@ void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
      * will get caught from ptrace API, handling the discovered ASan internal crash.
      */
     char crashReport[PATH_MAX] = { 0 };
-    snprintf(crashReport, sizeof(crashReport), "%s/%s.%d", hfuzz->workDir, kLOGPREFIX, fuzzer->pid);
+    snprintf(crashReport, sizeof(crashReport), "%s/%s.%d", hfuzz->workDir, kLOGPREFIX, ptracePid);
     if (files_exists(crashReport)) {
         LOG_W("Un-handled ASan report due to compiler-rt internal error - retry with '%s' (%s)",
               crashReport, fuzzer->fileName);
 
         /* Manually set the exitcode to ASan to trigger report parsing */
-        arch_ptraceExitAnalyze(hfuzz, fuzzer->pid, fuzzer, HF_ASAN_EXIT_CODE);
+        arch_ptraceExitAnalyze(hfuzz, ptracePid, fuzzer, HF_ASAN_EXIT_CODE);
     }
 #endif
 
@@ -450,10 +473,10 @@ bool arch_archInit(honggfuzz_t * hfuzz)
             LOG_E("Kernel version '%s' not supporting chosen perf method", uts.release);
             return false;
         }
-    }
 
-    if (arch_perfInit(hfuzz) == false) {
-        return false;
+        if (arch_perfInit(hfuzz) == false) {
+            return false;
+        }
     }
 #if defined(__ANDROID__) && defined(__arm__)
     /*
@@ -467,6 +490,19 @@ bool arch_archInit(honggfuzz_t * hfuzz)
         return false;
     }
 #endif
+
+    /* If read PID from file enable - read current value */
+    /* 
+     * TODO: Some init systems support multiple PIDs /file (one /line), add support
+     * for them too. Practically we need to maintain an array of PIDs instead of just
+     * one pid in hfuzz struct.
+     */
+    if (hfuzz->pidFile) {
+        if (files_readPidFromFile(hfuzz->pidFile, &hfuzz->pid) == false) {
+            LOG_E("Failed to read PID from file");
+            return false;
+        }
+    }
 
     /*
      * If sanitizer fuzzing enabled increase number of major frames, since top 7-9 frames

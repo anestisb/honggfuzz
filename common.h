@@ -203,7 +203,6 @@ typedef struct {
     char **files;
     size_t fileCnt;
     size_t lastCheckedFileIndex;
-    pid_t pid;
     char *envs[128];
 
     time_t timeStart;
@@ -214,7 +213,7 @@ typedef struct {
     size_t blCrashesCnt;
     size_t timeoutedCnt;
 
-    /* For the linux/ code */
+    /* For the Linux code */
     uint8_t *dynamicFileBest;
     size_t dynamicFileBestSz;
     dynFileMethod_t dynFileMethod;
@@ -234,6 +233,8 @@ typedef struct {
     sanOpts_t sanOpts;
     size_t numMajorFrames;
     bool isDynFileLocked;
+    pid_t pid;
+    const char *pidFile;
 #if defined(EXTENSION_ENABLED)
     void **userData;
 #endif
