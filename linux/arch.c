@@ -413,13 +413,13 @@ void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
      * will get caught from ptrace API, handling the discovered ASan internal crash.
      */
     char crashReport[PATH_MAX] = { 0 };
-    snprintf(crashReport, sizeof(crashReport), "%s/%s.%d", hfuzz->workDir, kLOGPREFIX, fuzzer->pid);
+    snprintf(crashReport, sizeof(crashReport), "%s/%s.%d", hfuzz->workDir, kLOGPREFIX, ptracePid);
     if (files_exists(crashReport)) {
         LOG_W("Un-handled ASan report due to compiler-rt internal error - retry with '%s' (%s)",
               crashReport, fuzzer->fileName);
 
         /* Manually set the exitcode to ASan to trigger report parsing */
-        arch_ptraceExitAnalyze(hfuzz, fuzzer->pid, fuzzer, HF_ASAN_EXIT_CODE);
+        arch_ptraceExitAnalyze(hfuzz, ptracePid, fuzzer, HF_ASAN_EXIT_CODE);
     }
 #endif
 

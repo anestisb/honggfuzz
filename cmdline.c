@@ -448,6 +448,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         }
     }
 
+    /* TODO: Add logic to identify which worker crashed remote PID to enable more threads */
     if (hfuzz->pid > 0) {
         LOG_I("PID=%d specified, lowering maximum number of concurrent threads to 1", hfuzz->pid);
         hfuzz->threadsMax = 1;
