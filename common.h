@@ -187,7 +187,6 @@ typedef struct {
     char **files;
     size_t fileCnt;
     size_t lastCheckedFileIndex;
-    pid_t pid;
     char *envs[128];
 
     time_t timeStart;
@@ -198,7 +197,7 @@ typedef struct {
     size_t blCrashesCnt;
     size_t timeoutedCnt;
 
-    /* For the linux/ code */
+    /* For the Linux code */
     uint8_t *dynamicFileBest;
     size_t dynamicFileBestSz;
     dynFileMethod_t dynFileMethod;
@@ -218,6 +217,8 @@ typedef struct {
     sanOpts_t sanOpts;
     size_t numMajorFrames;
     bool isDynFileLocked;
+    pid_t pid;
+    const char *pidFile;
 } honggfuzz_t;
 
 typedef struct fuzzer_t {
@@ -233,7 +234,7 @@ typedef struct fuzzer_t {
     char report[_HF_REPORT_SIZE];
     bool mainWorker;
 
-    /* For linux/ code */
+    /* For Linux code */
     uint8_t *dynamicFile;
     hwcnt_t hwCnts;
     sancovcnt_t sanCovCnts;
@@ -248,5 +249,8 @@ typedef struct {
 } funcs_t;
 
 #define ARRAYSIZE(x) (sizeof(x) / sizeof(*x))
+
+#define rmb()	__asm__ __volatile__("":::"memory")
+#define wmb()	__sync_synchronize()
 
 #endif
