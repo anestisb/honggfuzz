@@ -139,21 +139,27 @@ bool arch_launchChild(honggfuzz_t * hfuzz, char *fileName)
     }
 
     /* Address Sanitizer (ASan) */
-    if (setenv("ASAN_OPTIONS", hfuzz->sanOpts.asanOpts, 1) == -1) {
-        PLOG_E("setenv(ASAN_OPTIONS) failed");
-        return false;
+    if (hfuzz->sanOpts.asanOpts) {
+        if (setenv("ASAN_OPTIONS", hfuzz->sanOpts.asanOpts, 1) == -1) {
+            PLOG_E("setenv(ASAN_OPTIONS) failed");
+            return false;
+        }
     }
 
     /* Memory Sanitizer (MSan) */
-    if (setenv("MSAN_OPTIONS", hfuzz->sanOpts.msanOpts, 1) == -1) {
-        PLOG_E("setenv(MSAN_OPTIONS) failed");
-        return false;
+    if (hfuzz->sanOpts.msanOpts) {
+        if (setenv("MSAN_OPTIONS", hfuzz->sanOpts.msanOpts, 1) == -1) {
+            PLOG_E("setenv(MSAN_OPTIONS) failed");
+            return false;
+        }
     }
 
     /* Undefined Behavior Sanitizer (UBSan) */
-    if (setenv("UBSAN_OPTIONS", hfuzz->sanOpts.ubsanOpts, 1) == -1) {
-        PLOG_E("setenv(UBSAN_OPTIONS) failed");
-        return false;
+    if (hfuzz->sanOpts.ubsanOpts) {
+        if (setenv("UBSAN_OPTIONS", hfuzz->sanOpts.ubsanOpts, 1) == -1) {
+            PLOG_E("setenv(UBSAN_OPTIONS) failed");
+            return false;
+        }
     }
 
     /*
@@ -492,11 +498,6 @@ bool arch_archInit(honggfuzz_t * hfuzz)
 #endif
 
     /* If read PID from file enable - read current value */
-    /* 
-     * TODO: Some init systems support multiple PIDs /file (one /line), add support
-     * for them too. Practically we need to maintain an array of PIDs instead of just
-     * one pid in hfuzz struct.
-     */
     if (hfuzz->pidFile) {
         if (files_readPidFromFile(hfuzz->pidFile, &hfuzz->pid) == false) {
             LOG_E("Failed to read PID from file");
@@ -511,6 +512,15 @@ bool arch_archInit(honggfuzz_t * hfuzz)
 #if _HF_MONITOR_SIGABRT
     hfuzz->numMajorFrames = 14;
 #endif
+
+    /* 
+     * If monitoring remote process don't adjust sanitizer flags for spawned workers. It
+     * is user's responsibility to spawn remote process with correct flags & path for data
+     * files aligned with workspace expected dir.
+     */
+    if (hfuzz->pid > 0) {
+        return true;
+    }
 
     /* If sanitizer coverage enabled init workspace subdir */
     if (hfuzz->useSanCov) {

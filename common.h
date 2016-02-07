@@ -253,7 +253,7 @@ typedef struct fuzzer_t {
     char report[_HF_REPORT_SIZE];
     bool mainWorker;
 
-    /* For linux/ code */
+    /* For Linux code */
     uint8_t *dynamicFile;
     hwcnt_t hwCnts;
     sancovcnt_t sanCovCnts;
@@ -268,5 +268,8 @@ typedef struct {
 } funcs_t;
 
 #define ARRAYSIZE(x) (sizeof(x) / sizeof(*x))
+
+#define rmb()	__asm__ __volatile__("":::"memory")
+#define wmb()	__sync_synchronize()
 
 #endif

@@ -680,7 +680,6 @@ bool files_readPidFromFile(const char *fileName, pid_t * pidPtr)
         return false;
     }
 
-    /* TODO: Add support for multi-line trace PIDs (e.g. Android svcs from init) */
     char *lineptr = NULL;
     size_t lineSz = 0;
     if (getline(&lineptr, &lineSz, fPID) == -1) {
@@ -699,6 +698,7 @@ bool files_readPidFromFile(const char *fileName, pid_t * pidPtr)
     ret = true;
 
  bail:
+    free(lineptr);
     fclose(fPID);
     return ret;
 }
