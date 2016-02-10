@@ -21,8 +21,8 @@
  *
  */
 
-#ifndef _COMMON_H_
-#define _COMMON_H_
+#ifndef _HF_COMMON_H_
+#define _HF_COMMON_H_
 
 #include <limits.h>
 #include <pthread.h>
@@ -96,6 +96,9 @@
 #define _HF_MONITOR_SIGABRT 1
 #endif
 
+/* Size of remote pid cmdline char buffer */
+#define _HF_PROC_CMDLINE_SZ 8192
+
 typedef enum {
     _HF_DYNFILE_NONE = 0x0,
     _HF_DYNFILE_INSTR_COUNT = 0x1,
@@ -103,8 +106,7 @@ typedef enum {
     _HF_DYNFILE_BTS_BLOCK = 0x8,
     _HF_DYNFILE_BTS_EDGE = 0x10,
     _HF_DYNFILE_IPT_BLOCK = 0x20,
-    _HF_DYNFILE_IPT_EDGE = 0x40,
-    _HF_DYNFILE_CUSTOM = 0x80,
+    _HF_DYNFILE_CUSTOM = 0x40,
 } dynFileMethod_t;
 
 typedef struct {
@@ -113,7 +115,6 @@ typedef struct {
     uint64_t cpuBtsBlockCnt;
     uint64_t cpuBtsEdgeCnt;
     uint64_t cpuIptBlockCnt;
-    uint64_t cpuIptEdgeCnt;
     uint64_t customCnt;
 } hwcnt_t;
 
@@ -203,6 +204,7 @@ typedef struct {
     char **files;
     size_t fileCnt;
     size_t lastCheckedFileIndex;
+    int exeFd;
     char *envs[128];
 
     time_t timeStart;
@@ -235,6 +237,7 @@ typedef struct {
     bool isDynFileLocked;
     pid_t pid;
     const char *pidFile;
+    char *pidCmd;
 #if defined(EXTENSION_ENABLED)
     void **userData;
 #endif
