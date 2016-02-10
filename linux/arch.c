@@ -26,6 +26,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,6 +45,8 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <sys/utsname.h>
 
 #include "linux/perf.h"
@@ -106,6 +109,20 @@
 #else
 #define kSAN_COV_OPTS  "coverage=1:coverage_direct=1"
 #endif
+
+/* Last known pid of remote long-lived process to be monitored */
+static pid_t lastRemotePid = -1;
+
+static inline bool arch_shouldAttach(honggfuzz_t * hfuzz)
+{
+    if (hfuzz->pid == 0) {
+        return true;
+    }
+    if (hfuzz->pid > 0 && lastRemotePid != hfuzz->pid) {
+        return true;
+    }
+    return false;
+}
 
 pid_t arch_fork(honggfuzz_t * hfuzz)
 {
@@ -241,6 +258,10 @@ bool arch_launchChild(honggfuzz_t * hfuzz, char *fileName)
      * Wait for the ptrace to attach
      */
     syscall(__NR_tkill, syscall(__NR_gettid), (uintptr_t) SIGSTOP);
+
+#ifdef __NR_execveat
+    syscall(__NR_execveat, hfuzz->exeFd, "", args, environ, AT_EMPTY_PATH);
+#endif
     execvp(args[0], args);
 
     util_recoverStdio();
@@ -328,14 +349,13 @@ void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
     }
     LOG_D("PID: %d is in a stopped state now", childPid);
 
-    static bool ptraceAttached = false;
-    if (ptraceAttached == false) {
+    if (arch_shouldAttach(hfuzz) == true) {
         if (arch_ptraceAttach(ptracePid) == false) {
             LOG_F("arch_ptraceAttach(pid=%d) failed", ptracePid);
         }
-        /* In case we fuzz a long-lived process (-p pid) we attach to it once only */
+        /* In case we fuzz a long-lived process attach to it once only */
         if (ptracePid != childPid) {
-            ptraceAttached = true;
+            lastRemotePid = ptracePid;
         }
     }
     /* A long-lived processed could have already exited, and we wouldn't know */
@@ -431,6 +451,9 @@ void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 
 bool arch_archInit(honggfuzz_t * hfuzz)
 {
+    /* We use execvp() as a fall-back mechanism (using PATH), so it might legitimately fail */
+    hfuzz->exeFd = open(hfuzz->cmdline[0], O_RDONLY | O_CLOEXEC);
+
     if (hfuzz->dynFileMethod != _HF_DYNFILE_NONE) {
         unsigned long major = 0, minor = 0;
         char *p = NULL;
@@ -447,11 +470,12 @@ bool arch_archInit(honggfuzz_t * hfuzz)
          *     way to detect it here. libperf exports some list functions,
          *     although small guarantees it's installed. Maybe a more targeted
          *     message at perf_event_open() error handling will help.
-         *  3) Intel's PT requires kernel >= 4.1
+         *  3) Intel's PT and new Intel BTS format require kernel >= 4.1
          */
         unsigned long checkMajor = 3, checkMinor = 7;
-        if ((hfuzz->dynFileMethod & _HF_DYNFILE_IPT_BLOCK)
-            || (hfuzz->dynFileMethod & _HF_DYNFILE_IPT_EDGE)) {
+        if ((hfuzz->dynFileMethod & _HF_DYNFILE_BTS_BLOCK) ||
+            (hfuzz->dynFileMethod & _HF_DYNFILE_BTS_EDGE) ||
+            (hfuzz->dynFileMethod & _HF_DYNFILE_IPT_BLOCK)) {
             checkMajor = 4;
             checkMinor = 1;
         }
@@ -498,6 +522,34 @@ bool arch_archInit(honggfuzz_t * hfuzz)
             LOG_E("Failed to read PID from file");
             return false;
         }
+    }
+
+    /* If remote pid, resolve command using procfs */
+    if (hfuzz->pid > 0) {
+        char procCmd[PATH_MAX] = { 0 };
+        snprintf(procCmd, sizeof(procCmd), "/proc/%d/cmdline", hfuzz->pid);
+
+        hfuzz->pidCmd = malloc(_HF_PROC_CMDLINE_SZ * sizeof(char));
+        if (!hfuzz->pidCmd) {
+            PLOG_E("malloc(%zu) failed", (size_t) _HF_PROC_CMDLINE_SZ);
+            return false;
+        }
+
+        size_t sz =
+            files_readFileToBufMax(procCmd, (uint8_t *) hfuzz->pidCmd, _HF_PROC_CMDLINE_SZ - 1);
+        if (sz == 0) {
+            LOG_E("Couldn't read '%s'", procCmd);
+            free(hfuzz->pidCmd);
+            return false;
+        }
+
+        /* Make human readable */
+        for (size_t i = 0; i < (sz - 1); i++) {
+            if (hfuzz->pidCmd[i] == '\0') {
+                hfuzz->pidCmd[i] = ' ';
+            }
+        }
+        hfuzz->pidCmd[sz] = '\0';
     }
 
     /*

@@ -21,8 +21,8 @@
  *
  */
 
-#ifndef _ARCH_H_
-#define _ARCH_H_
+#ifndef _HF_ARCH_H_
+#define _HF_ARCH_H_
 
 extern bool arch_launchChild(honggfuzz_t * fuzz, char *fileName);
 
@@ -32,4 +32,4 @@ extern pid_t arch_fork(honggfuzz_t * fuzz);
 
 extern void arch_reapChild(honggfuzz_t * fuzz, fuzzer_t * fuzzer);
 
-#endif
+#endif                          /* _HF_ARCH_H_ */
