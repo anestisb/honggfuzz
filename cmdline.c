@@ -161,6 +161,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         .fileCnt = 0,
         .lastCheckedFileIndex = 0,
         .pid = 0,
+        .exeFd = -1,
         .envs = {[0 ... (ARRAYSIZE(hfuzz->envs) - 1)] = NULL,},
 
         .timeStart = time(NULL),
@@ -209,6 +210,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         .numMajorFrames = 7,
         .isDynFileLocked = false,
         .pidFile = NULL,
+        .pidCmd = NULL,
     };
     /*  *INDENT-ON* */
 
@@ -222,7 +224,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         {{"logfile", required_argument, NULL, 'l'}, "Log file"},
         {{"verbose", no_argument, NULL, 'v'}, "Disable ANSI console; use simple log output"},
 #if defined(_HF_ARCH_LINUX) || defined(_HF_ARCH_DARWIN)
-        {{"verifier", no_argument, NULL, 'V'}, "Enable crashes verifier (default: disabled)"},
+        {{"verifier", no_argument, NULL, 'V'}, "Enable crashes verifier"},
 #endif
         {{"debug_level", required_argument, NULL, 'd'}, "Debug level (0 - FATAL ... 4 - DEBUG), (default: '3' [INFO])"},
         {{"extension", required_argument, NULL, 'e'}, "Input file extension (e.g. 'swf'), (default: 'fuzz')"},
@@ -244,7 +246,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         {{"env", required_argument, NULL, 'E'}, "Pass this environment variable, can be used multiple times"},
 
 #if defined(_HF_ARCH_LINUX)
-        {{"sancov", no_argument, NULL, 'C'}, "EXPERIMENTAL: Enable sanitizer coverage feedback (default: disabled)"},
+        {{"sancov", no_argument, NULL, 'C'}, "EXPERIMENTAL: Enable sanitizer coverage feedback"},
         {{"linux_pid", required_argument, NULL, 'p'}, "Attach to a pid (and its thread group)"},
         {{"linux_file_pid", required_argument, NULL, 'P'}, "Attach to pid (and its thread group) read from file"},
         {{"linux_addr_low_limit", required_argument, NULL, 0x500}, "Address limit (from si.si_addr) below which crashes are not reported, (default: '0')"},
@@ -256,7 +258,6 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         {{"linux_perf_bts_block", no_argument, NULL, 0x512}, "Use Intel BTS to count unique blocks"},
         {{"linux_perf_bts_edge", no_argument, NULL, 0x513}, "Use Intel BTS to count unique edges"},
         {{"linux_perf_ipt_block", no_argument, NULL, 0x514}, "Use Intel Processor Trace to count unique blocks"},
-        {{"linux_perf_ipt_edge", no_argument, NULL, 0x515}, "Use Intel Processor Trace to count unique edges"},
         {{"linux_perf_custom", no_argument, NULL, 0x520}, "Custom counter (see the interceptor/ directory for examples)"},
 #endif  // defined(_HF_ARCH_LINUX)
         {{0, 0, 0, 0}, NULL},
@@ -399,9 +400,6 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
             break;
         case 0x514:
             hfuzz->dynFileMethod |= _HF_DYNFILE_IPT_BLOCK;
-            break;
-        case 0x515:
-            hfuzz->dynFileMethod |= _HF_DYNFILE_IPT_EDGE;
             break;
         case 0x520:
             hfuzz->dynFileMethod |= _HF_DYNFILE_CUSTOM;

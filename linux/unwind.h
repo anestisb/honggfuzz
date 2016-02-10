@@ -21,8 +21,8 @@
  *
  */
 
-#ifndef _LINUX_UNWIND_H_
-#define _LINUX_UNWIND_H_
+#ifndef _HF_LINUX_UNWIND_H_
+#define _HF_LINUX_UNWIND_H_
 
 extern size_t arch_unwindStack(pid_t pid, funcs_t * funcs);
 extern char *arch_btContainsBLSymbol(honggfuzz_t * hfuzz, size_t num_frames, funcs_t * funcs);
