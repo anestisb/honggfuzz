@@ -212,6 +212,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         .isDynFileLocked = false,
         .pidFile = NULL,
         .pidCmd = NULL,
+        .monitorE2E = false,
     };
     /*  *INDENT-ON* */
 
@@ -252,6 +253,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         {{"sancov", no_argument, NULL, 'C'}, "EXPERIMENTAL: Enable sanitizer coverage feedback"},
         {{"linux_pid", required_argument, NULL, 'p'}, "Attach to a pid (and its thread group)"},
         {{"linux_file_pid", required_argument, NULL, 'P'}, "Attach to pid (and its thread group) read from file"},
+        {{"linux_monitor_e2e", no_argument, NULL, 'm'}, "Attach both to pid & spawned processes (and their thread groups)"},
         {{"linux_addr_low_limit", required_argument, NULL, 0x500}, "Address limit (from si.si_addr) below which crashes are not reported, (default: '0')"},
         {{"linux_keep_aslr", no_argument, NULL, 0x501}, "Don't disable ASLR randomization, might be useful with MSAN"},
         {{"linux_report_msan_umrs", no_argument, NULL, 0x502}, "Report MSAN's UMRS (uninitialized memory access)"},
@@ -276,7 +278,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
     const char *logfile = NULL;
     int opt_index = 0;
     for (;;) {
-        int c = getopt_long(argc, argv, "-?hqvVMSsuf:d:e:W:r:c:F:t:R:n:N:l:p:P:g:E:w:B:b:A:C", opts,
+        int c = getopt_long(argc, argv, "-?hqvVMSsuf:d:e:W:r:c:F:t:R:n:N:l:p:P:mg:E:w:B:b:A:C", opts,
                             &opt_index);
         if (c < 0)
             break;
@@ -361,6 +363,9 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
             break;
         case 'P':
             hfuzz->pidFile = optarg;
+            break;
+        case 'm':
+            hfuzz->monitorE2E = true;
             break;
         case 'E':
             for (size_t i = 0; i < ARRAYSIZE(hfuzz->envs); i++) {
@@ -473,6 +478,11 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
     if (hfuzz->pid > 0 || hfuzz->pidFile) {
         LOG_I("PID=%d specified, lowering maximum number of concurrent threads to 1", hfuzz->pid);
         hfuzz->threadsMax = 1;
+    }
+
+    if (hfuzz->monitorE2E && !(hfuzz->pid > 0 || hfuzz->pidFile)) {
+        LOG_E("You need to specify remote pid to enable end-to-end monitoring");
+        return false;
     }
 
     if (hfuzz->flipRate == 0.0L && hfuzz->useVerifier) {

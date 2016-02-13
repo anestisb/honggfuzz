@@ -238,6 +238,7 @@ typedef struct {
     pid_t pid;
     const char *pidFile;
     char *pidCmd;
+    bool monitorE2E;
 #if defined(EXTENSION_ENABLED)
     void **userData;
 #endif
