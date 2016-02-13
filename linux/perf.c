@@ -160,7 +160,7 @@ static bool arch_perfOpen(honggfuzz_t * hfuzz, pid_t pid, dynFileMethod_t method
     pe.exclude_idle = 1;
     pe.exclude_callchain_kernel = 1;
     pe.exclude_callchain_user = 1;
-    if (hfuzz->pid > 0) {
+    if (hfuzz->pid == pid) {
         pe.disabled = 0;
         pe.enable_on_exec = 0;
     } else {

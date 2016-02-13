@@ -20,6 +20,6 @@
 #ifndef _HF_LINUX_SANCOV_H_
 #define _HF_LINUX_SANCOV_H_
 
-extern void arch_sanCovAnalyze(honggfuzz_t * hfuzz, fuzzer_t * fuzzer);
+extern void arch_sanCovAnalyze(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, pid_t targetPid);
 
 #endif                          /* _HF_LINUX_SANCOV_H_ */

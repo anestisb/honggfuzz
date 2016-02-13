@@ -334,7 +334,147 @@ static void arch_checkTimeLimit(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
     }
 }
 
-void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
+static void arch_reapChildE2E(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
+{
+    timer_t timerid;
+    if (arch_setTimer(&timerid) == false) {
+        LOG_F("Couldn't set timer");
+    }
+
+    /* Suspend spawned fuzzer child */
+    if (arch_ptraceWaitForPidStop(fuzzer->pid) == false) {
+        LOG_F("PID %d not in a stopped state", fuzzer->pid);
+    }
+    LOG_D("PID: %d is in a stopped state now", fuzzer->pid);
+
+    /* Verify long-lived process still running  */
+    if (kill(hfuzz->pid, 0) == -1) {
+        if (hfuzz->pidFile) {
+            /* If pid from file, check again for cases of auto-restart daemons that update it */
+            /* 
+             * TODO: Investigate if we need to delay here, so that target process has
+             * enough time to restart. Tricky to answer since is target dependant.
+             */
+            if (files_readPidFromFile(hfuzz->pidFile, &hfuzz->pid) == false) {
+                LOG_F("Failed to read new pid from file - abort");
+            } else {
+                if (kill(hfuzz->pid, 0) == -1) {
+                    PLOG_F("Liveness of PID %d read from file questioned - abort", hfuzz->pid);
+                } else {
+                    LOG_D("Monitor PID has been updated (pid=%d)", hfuzz->pid);
+                }
+            }
+        } else {
+            PLOG_F("Liveness of %d questioned - abort", hfuzz->pid);
+        }
+    }
+
+    /* First attach to long-lived process (and its thread group) */
+    if (arch_shouldAttach(hfuzz) == true) {
+        if (arch_ptraceAttach(hfuzz->pid) == false) {
+            LOG_F("arch_ptraceAttach(pid=%d) failed", hfuzz->pid);
+        }
+        /* In case we fuzz a long-lived process attach to it once only */
+        if (hfuzz->pid != fuzzer->pid) {
+            lastRemotePid = hfuzz->pid;
+        }
+    }
+
+    /* Then attach to spawned fuzzer child */
+    if (arch_ptraceAttach(fuzzer->pid) == false) {
+        LOG_F("arch_ptraceAttach(pid=%d) failed", fuzzer->pid);
+    }
+
+    /* Enable perf for both pid groups */
+    perfFd_t childPerfFds, pidPerfFds;
+    if (arch_perfEnable(fuzzer->pid, hfuzz, &childPerfFds) == false) {
+        LOG_F("Couldn't enable perf counters for fuzzer pid %d", fuzzer->pid);
+    }
+    if (arch_perfEnable(hfuzz->pid, hfuzz, &pidPerfFds) == false) {
+        LOG_F("Couldn't enable perf counters for remote pid %d", hfuzz->pid);
+    }
+
+    /* Resume child fuzzer process */
+    if (kill(fuzzer->pid, SIGCONT) == -1) {
+        PLOG_F("Restarting PID: %d failed", fuzzer->pid);
+    }
+
+    /* Monitor loop */
+    for (;;) {
+        int status;
+        pid_t pid = wait4(-1, &status, __WALL | __WNOTHREAD, NULL);
+        if (pid == -1 && errno == EINTR) {
+            if (hfuzz->tmOut) {
+                arch_checkTimeLimit(hfuzz, fuzzer);
+            }
+            continue;
+        }
+        if (pid == -1 && errno == ECHILD) {
+            LOG_D("No more processes to track");
+            break;
+        }
+        if (pid == -1) {
+            PLOG_F("wait4() failed");
+        }
+        LOG_D("PID '%d' returned with status '%d'", pid, status);
+
+        arch_ptraceGetCustomPerf(hfuzz, fuzzer->pid, &fuzzer->hwCnts.customCnt);
+        arch_ptraceGetCustomPerf(hfuzz, hfuzz->pid, &fuzzer->hwCnts.customCnt);
+
+        /* Analyze signal raised for monitored pid groups */
+        arch_ptraceAnalyze(hfuzz, status, pid, fuzzer);
+
+        /* Abort monitor loop if fuzzer child exits, we don't expect the long-lived process to exit */
+        if (pid == fuzzer->pid && (WIFEXITED(status) || WIFSIGNALED(status))) {
+            break;
+        }
+    }
+
+    arch_removeTimer(&timerid);
+
+#if !_HF_MONITOR_SIGABRT
+    /*
+     * There might be cases where ASan instrumented targets crash while generating
+     * reports for detected errors (inside __asan_report_error() proc). Under such
+     * scenarios target fails to exit or SIGABRT (AsanDie() proc) as defined in
+     * ASAN_OPTIONS flags, leaving garbage logs. An attempt is made to parse such
+     * logs for cases where enough data are written to identify potentially missed
+     * crashes. If ASan internal error results into a SIGSEGV being raised, it
+     * will get caught from ptrace API, handling the discovered ASan internal crash.
+     */
+    char crashReport[PATH_MAX] = { 0 };
+
+    /* Check against child fuzzer pid */
+    snprintf(crashReport, sizeof(crashReport), "%s/%s.%d", hfuzz->workDir, kLOGPREFIX, fuzzer->pid);
+    if (files_exists(crashReport)) {
+        LOG_W("Un-handled ASan report due to compiler-rt internal error - retry with '%s' (%s)",
+              crashReport, fuzzer->fileName);
+
+        /* Manually set the exitcode to ASan to trigger report parsing */
+        arch_ptraceExitAnalyze(hfuzz, fuzzer->pid, fuzzer, HF_ASAN_EXIT_CODE);
+    }
+
+    /* Check against remote long-lived process too */
+    snprintf(crashReport, sizeof(crashReport), "%s/%s.%d", hfuzz->workDir, kLOGPREFIX, hfuzz->pid);
+    if (files_exists(crashReport)) {
+        LOG_W("Un-handled ASan report due to compiler-rt internal error - retry with '%s' (%s)",
+              crashReport, fuzzer->fileName);
+
+        /* Manually set the exitcode to ASan to trigger report parsing */
+        arch_ptraceExitAnalyze(hfuzz, hfuzz->pid, fuzzer, HF_ASAN_EXIT_CODE);
+    }
+#endif
+
+    /* Feedback data gathered from fuzzer child */
+    arch_perfAnalyze(hfuzz, fuzzer, &childPerfFds);
+    arch_sanCovAnalyze(hfuzz, fuzzer, fuzzer->pid);
+
+    /* Feedback data gathered from remote pid */
+    arch_perfAnalyze(hfuzz, fuzzer, &pidPerfFds);
+    arch_sanCovAnalyze(hfuzz, fuzzer, hfuzz->pid);
+}
+
+static void arch_reapChildOrig(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 {
     pid_t ptracePid = (hfuzz->pid > 0) ? hfuzz->pid : fuzzer->pid;
     pid_t childPid = fuzzer->pid;
@@ -446,7 +586,16 @@ void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 
     arch_removeTimer(&timerid);
     arch_perfAnalyze(hfuzz, fuzzer, &perfFds);
-    arch_sanCovAnalyze(hfuzz, fuzzer);
+    arch_sanCovAnalyze(hfuzz, fuzzer, ptracePid);
+}
+
+void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
+{
+    if (hfuzz->monitorE2E) {
+        arch_reapChildE2E(hfuzz, fuzzer);
+    } else {
+        arch_reapChildOrig(hfuzz, fuzzer);
+    }
 }
 
 bool arch_archInit(honggfuzz_t * hfuzz)
