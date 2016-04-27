@@ -126,4 +126,8 @@ endif
 LOCAL_SRC_FILES += $(ARCH_SRCS)
 LOCAL_CFLAGS += -D_HF_ARCH_${ARCH}
 
+ifeq ($(APP_OPTIM),debug)
+  LOCAL_CFLAGS += -DDEBUG_BUILD
+endif
+
 include $(BUILD_EXECUTABLE)

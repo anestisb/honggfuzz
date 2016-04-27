@@ -970,6 +970,19 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
     ATOMIC_CLEAR(hfuzz->dynFileIterExpire);
 
     arch_ptraceGenerateReport(pid, fuzzer, funcs, funcCnt, &si, instr);
+
+    /* Save proc maps for every crash added to report */
+    if (hfuzz->saveMaps) {
+        char *lastDot = strrchr(fuzzer->crashFileName, '.');
+        int baseNameLen = lastDot - fuzzer->crashFileName;
+        char mapsFile[PATH_MAX] = { 0 };
+        snprintf(mapsFile, PATH_MAX, "%s/%.*s.maps", hfuzz->workDir, baseNameLen,
+                 fuzzer->crashFileName);
+
+        if (files_procMapsToFile(pid, mapsFile) == false) {
+            LOG_E("Failed to write maps file (pid=%d", pid);
+        }
+    }
 }
 
 static int arch_parseAsanReport(honggfuzz_t * hfuzz, pid_t pid, funcs_t * funcs, void **crashAddr,

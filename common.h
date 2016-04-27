@@ -243,6 +243,7 @@ typedef struct {
     bool useScreen;
     bool useVerifier;
     bool useSimplifier;
+    bool saveMaps;
     time_t timeStart;
     char *fileExtn;
     char *workDir;

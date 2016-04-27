@@ -433,6 +433,59 @@ bool files_parseBlacklist(honggfuzz_t * hfuzz)
     return true;
 }
 
+#if defined(_HF_ARCH_LINUX)
+#define PROC_MAP_SZ   2176
+#define PROC_MAP_SZ_  2175
+#define XSTR(A)       STRI(A)
+#define STRI(A)       #A
+bool files_procMapsToFile(pid_t pid, const char *fileName)
+{
+    FILE *f = NULL;
+    char fMaps[PATH_MAX] = { 0 };
+
+    int dstOpenFlags = O_CREAT | O_WRONLY | O_EXCL;
+    mode_t dstFilePerms = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
+
+    int outFD = open(fileName, dstOpenFlags, dstFilePerms);
+    if (outFD == -1) {
+        PLOG_E("Couldn't open '%s' destination", fileName);
+        return false;
+    }
+
+    snprintf(fMaps, PATH_MAX, "/proc/%d/maps", pid);
+
+    if ((f = fopen(fMaps, "rb")) == NULL) {
+        PLOG_E("Couldn't open '%s' - R/O mode", fMaps);
+        close(outFD);
+        return false;
+    }
+
+    while (!feof(f)) {
+        char readBuf[PROC_MAP_SZ + 128], perm[5], dev[7], name[PATH_MAX];
+        unsigned long long start, end;
+        unsigned long inode, offset;
+
+        memset(readBuf, 0, sizeof(readBuf));
+        memset(perm, 0, sizeof(perm));
+        memset(dev, 0, sizeof(dev));
+        memset(name, 0, sizeof(name));
+
+        if (fgets(readBuf, sizeof(readBuf), f) == 0)
+            break;
+
+        sscanf(readBuf, "%llx-%llx %4s %lx %6s %ld %" XSTR(PROC_MAP_SZ_) "s",
+               &start, &end, perm, &offset, dev, &inode, name);
+
+        dprintf(outFD, "%016llx-%016llx (%lld KB)\t%s\t%lx\t%6s\t%ld\t'%.*s'\n",
+                start, end, (end - start) / 1024, perm, offset, dev, inode, PROC_MAP_SZ_, name);
+    }
+    fclose(f);
+    close(outFD);
+
+    return true;
+}
+#endif                          /* defined(_HF_ARCH_LINUX) */
+
 uint8_t *files_mapFile(char *fileName, off_t * fileSz, int *fd, bool isWritable)
 {
     int mmapProt = PROT_READ;
