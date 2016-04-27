@@ -32,5 +32,7 @@ typedef struct {
 } funcs_t;
 
 extern size_t arch_unwindStack(pid_t pid, funcs_t * funcs);
+extern char *arch_btContainsBLSymbol(honggfuzz_t * hfuzz, size_t num_frames, funcs_t * funcs);
+extern char *arch_btContainsWLSymbol(honggfuzz_t * hfuzz, size_t num_frames, funcs_t * funcs);
 
 #endif

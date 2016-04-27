@@ -486,6 +486,114 @@ bool files_procMapsToFile(pid_t pid, const char *fileName)
 }
 #endif                          /* defined(_HF_ARCH_LINUX) */
 
+bool files_parseSymbolsBlacklist(honggfuzz_t * hfuzz)
+{
+    FILE *fSBl = fopen(hfuzz->symbolsBlacklistFile, "rb");
+    if (fSBl == NULL) {
+        PLOG_E("Couldn't open '%s' - R/O mode", hfuzz->symbolsBlacklistFile);
+        return false;
+    }
+
+    char *lineptr = NULL;
+    size_t n = 0;
+    for (;;) {
+        if (getline(&lineptr, &n, fSBl) == -1) {
+            break;
+        }
+
+        /* Check for empty or too short symbols */
+        if (strlen(lineptr) < 3) {
+            LOG_F("Input symbol '%s' too short (strlen < 3)", lineptr);
+            fclose(fSBl);
+            free(lineptr);
+            return false;
+        }
+
+        if ((hfuzz->symbolsBlacklist =
+             realloc(hfuzz->symbolsBlacklist,
+                     (hfuzz->symbolsBlacklistCnt + 1) * sizeof(hfuzz->symbolsBlacklist[0]))) ==
+            NULL) {
+            PLOG_E("Realloc failed (sz=%zu)",
+                   (hfuzz->symbolsBlacklistCnt + 1) * sizeof(hfuzz->symbolsBlacklist[0]));
+            fclose(fSBl);
+            free(lineptr);
+            return false;
+        }
+        hfuzz->symbolsBlacklist[hfuzz->symbolsBlacklistCnt] = malloc(strlen(lineptr));
+        if (!hfuzz->symbolsBlacklist[hfuzz->symbolsBlacklistCnt]) {
+            PLOG_E("malloc(%zu) failed", strlen(lineptr));
+            fclose(fSBl);
+            free(lineptr);
+            return false;
+        }
+        strncpy(hfuzz->symbolsBlacklist[hfuzz->symbolsBlacklistCnt], lineptr, strlen(lineptr));
+        hfuzz->symbolsBlacklistCnt += 1;
+    }
+
+    if (hfuzz->symbolsBlacklistCnt > 0) {
+        LOG_I("Loaded %zu symbol(s) from the blacklist file", hfuzz->symbolsBlacklistCnt);
+    } else {
+        LOG_F("Empty symbols blacklist file '%s'", hfuzz->symbolsBlacklistFile);
+    }
+    fclose(fSBl);
+    free(lineptr);
+    return true;
+}
+
+bool files_parseSymbolsWhitelist(honggfuzz_t * hfuzz)
+{
+    FILE *fSWl = fopen(hfuzz->symbolsWhitelistFile, "rb");
+    if (fSWl == NULL) {
+        PLOG_E("Couldn't open '%s' - R/O mode", hfuzz->symbolsWhitelistFile);
+        return false;
+    }
+
+    char *lineptr = NULL;
+    size_t n = 0;
+    for (;;) {
+        if (getline(&lineptr, &n, fSWl) == -1) {
+            break;
+        }
+
+        /* Check for empty or too short symbols */
+        if (strlen(lineptr) < 3) {
+            LOG_F("Input symbol '%s' too short (strlen < 3)", lineptr);
+            fclose(fSWl);
+            free(lineptr);
+            return false;
+        }
+
+        if ((hfuzz->symbolsWhitelist =
+             realloc(hfuzz->symbolsWhitelist,
+                     (hfuzz->symbolsWhitelistCnt + 1) * sizeof(hfuzz->symbolsWhitelist[0]))) ==
+            NULL) {
+            PLOG_E("Realloc failed (sz=%zu)",
+                   (hfuzz->symbolsWhitelistCnt + 1) * sizeof(hfuzz->symbolsWhitelist[0]));
+            fclose(fSWl);
+            free(lineptr);
+            return false;
+        }
+        hfuzz->symbolsWhitelist[hfuzz->symbolsWhitelistCnt] = malloc(strlen(lineptr));
+        if (!hfuzz->symbolsWhitelist[hfuzz->symbolsWhitelistCnt]) {
+            PLOG_E("malloc(%zu) failed", strlen(lineptr));
+            fclose(fSWl);
+            free(lineptr);
+            return false;
+        }
+        strncpy(hfuzz->symbolsWhitelist[hfuzz->symbolsWhitelistCnt], lineptr, strlen(lineptr));
+        hfuzz->symbolsWhitelistCnt += 1;
+    }
+
+    if (hfuzz->symbolsWhitelistCnt > 0) {
+        LOG_I("Loaded %zu symbol(s) from the whitelist file", hfuzz->symbolsWhitelistCnt);
+    } else {
+        LOG_F("Empty symbols whitelist file '%s'", hfuzz->symbolsWhitelistFile);
+    }
+    fclose(fSWl);
+    free(lineptr);
+    return true;
+}
+
 uint8_t *files_mapFile(char *fileName, off_t * fileSz, int *fd, bool isWritable)
 {
     int mmapProt = PROT_READ;

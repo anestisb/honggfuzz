@@ -149,6 +149,12 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         .blacklistFile = NULL,
         .blacklistCnt = 0,
         .blacklist = NULL,
+        .symbolsBlacklistFile = NULL,
+        .symbolsBlacklistCnt = 0,
+        .symbolsBlacklist = NULL,
+        .symbolsWhitelistFile = NULL,
+        .symbolsWhitelistCnt = 0,
+        .symbolsWhitelist = NULL,
         .maxFileSz = (1024 * 1024),
         .tmOut = 10,
         .mutationsMax = 0,
@@ -258,6 +264,8 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         {{"linux_addr_low_limit", required_argument, NULL, 0x500}, "Address limit (from si.si_addr) below which crashes are not reported, (default: '0')"},
         {{"linux_keep_aslr", no_argument, NULL, 0x501}, "Don't disable ASLR randomization, might be useful with MSAN"},
         {{"linux_proc_maps", no_argument, NULL, 0x504}, "Enable proc maps saving"},
+        {{"symbols_bl", required_argument, NULL, 'b'}, "Symbols blacklist file (one entry per line)"},
+        {{"symbols_wl", required_argument, NULL, 'A'}, "Symbols whitelist file (one entry per line)"},
         {{"linux_perf_ignore_above", required_argument, NULL, 0x503}, "Ignore perf events which report IPs above this address"},
         {{"linux_perf_instr", no_argument, NULL, 0x510}, "Use PERF_COUNT_HW_INSTRUCTIONS perf"},
         {{"linux_perf_branch", no_argument, NULL, 0x511}, "Use PERF_COUNT_HW_BRANCH_INSTRUCTIONS perf"},
@@ -279,7 +287,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
     const char *logfile = NULL;
     int opt_index = 0;
     for (;;) {
-        int c = getopt_long(argc, argv, "-?hqvVSsuPf:d:e:W:r:c:F:t:R:n:N:l:p:g:E:w:B:C", opts,
+        int c = getopt_long(argc, argv, "-?hqvVSsuPf:d:e:W:r:c:F:t:R:n:N:l:p:g:E:w:B:b:A:C", opts,
                             &opt_index);
         if (c < 0)
             break;
@@ -384,6 +392,12 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
             break;
         case 'w':
             hfuzz->dictionaryFile = optarg;
+            break;
+        case 'b':
+            hfuzz->symbolsBlacklistFile = optarg;
+            break;
+        case 'A':
+            hfuzz->symbolsWhitelistFile = optarg;
             break;
         case 'B':
             hfuzz->blacklistFile = optarg;

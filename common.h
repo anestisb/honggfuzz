@@ -254,6 +254,12 @@ typedef struct {
     const char *blacklistFile;
     uint64_t *blacklist;
     size_t blacklistCnt;
+    const char *symbolsBlacklistFile;
+    char **symbolsBlacklist;
+    size_t symbolsBlacklistCnt;
+    const char *symbolsWhitelistFile;
+    char **symbolsWhitelist;
+    size_t symbolsWhitelistCnt;
     long tmOut;
     size_t dictionaryCnt;
     size_t mutationsMax;

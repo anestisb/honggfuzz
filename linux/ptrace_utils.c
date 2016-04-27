@@ -797,6 +797,7 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
         PLOG_W("Couldn't get siginfo for pid %d", pid);
     }
 
+    void *sig_addr = si.si_addr;
     arch_getInstrStr(pid, &pc, instr);
 
     LOG_D("Pid: %d, signo: %d, errno: %d, code: %d, addr: %p, pc: %"
@@ -907,6 +908,22 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
     /* Increase global crashes counter */
     ATOMIC_POST_INC(hfuzz->crashesCnt);
 
+    /* If crash detected, zero set two MSB */
+    __sync_fetch_and_and(&hfuzz->dynFileIterExpire, _HF_DYNFILE_SUB_MASK);
+
+    /*
+     * Check if backtrace contains whitelisted symbol. Whitelist overrides
+     * both stackhash and symbol blacklist.
+     */
+    if (hfuzz->symbolsWhitelist) {
+        char *wlSymbol = arch_btContainsWLSymbol(hfuzz, funcCnt, funcs);
+        if (wlSymbol != NULL) {
+            saveUnique = false;
+            LOG_I("Whitelisted symbol '%s' found, skipping blacklist checks", wlSymbol);
+            goto saveCrash;
+        }
+    }
+
     /*
      * Check if stackhash is blacklisted
      */
@@ -917,10 +934,22 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
         return;
     }
 
+    /*
+     * Check if backtrace contains blacklisted symbol
+     */
+    if (hfuzz->symbolsBlacklist) {
+        char *blSymbol = arch_btContainsBLSymbol(hfuzz, funcCnt, funcs);
+        if (blSymbol != NULL) {
+            LOG_I("Blacklisted symbol '%s' found, skipping", blSymbol);
+            ATOMIC_POST_INC(hfuzz->blCrashesCnt);
+            return;
+        }
+    }
+
+ saveCrash:
     /* If non-blacklisted crash detected, zero set two MSB */
     ATOMIC_POST_ADD(hfuzz->dynFileIterExpire, _HF_DYNFILE_SUB_MASK);
 
-    void *sig_addr = si.si_addr;
     if (hfuzz->linux.disableRandomization == false) {
         pc = 0UL;
         sig_addr = NULL;

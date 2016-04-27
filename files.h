@@ -55,6 +55,10 @@ extern bool files_parseBlacklist(honggfuzz_t * hfuzz);
 bool files_procMapsToFile(pid_t pid, const char *fileName);
 #endif
 
+extern bool files_parseSymbolsBlacklist(honggfuzz_t * hfuzz);
+
+extern bool files_parseSymbolsWhitelist(honggfuzz_t * hfuzz);
+
 extern uint8_t *files_mapFile(char *fileName, off_t * fileSz, int *fd, bool isWritable);
 
 extern bool files_readPidFromFile(const char *fileName, pid_t * pidPtr);
