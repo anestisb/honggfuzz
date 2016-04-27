@@ -36,7 +36,7 @@
 #include <sys/personality.h>
 #include <sys/ptrace.h>
 #include <sys/prctl.h>
-#include <sys/resource.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/time.h>
@@ -49,16 +49,13 @@
 #include <sys/types.h>
 #include <sys/utsname.h>
 
+#include "files.h"
 #include "linux/perf.h"
 #include "linux/ptrace_utils.h"
-#include "linux/sancov.h"
 #include "log.h"
+#include "sancov.h"
+#include "subproc.h"
 #include "util.h"
-#include "files.h"
-
-/* Stringify */
-#define XSTR(x)         #x
-#define STR(x)          XSTR(x)
 
 /* Common sanitizer flags */
 #if _HF_MONITOR_SIGABRT
@@ -67,78 +64,64 @@
 #define ABORT_FLAG        "abort_on_error=0"
 #endif
 
-#if defined(__ANDROID__)
-/*
- * symbolize: Disable symbolication since it changes logs (which are parsed) format
- * start_deactivated: Enable on Android to reduce memory usage (useful when not all
- *                    target's DSOs are compiled with sanitizer enabled
- * abort_on_error: Disable for platforms where SIGABRT is not monitored
- */
-#define kSAN_COMMON_ARCH    "symbolize=0:"ABORT_FLAG":start_deactivated=1"
-#else
-#define kSAN_COMMON_ARCH    "symbolize=0:"ABORT_FLAG
-#endif
+#define SIGNAL_TIMER (SIGRTMIN + 1)
 
-/* Sanitizer specific flags (set 'abort_on_error has priority over exitcode') */
-#define kASAN_OPTS          "allow_user_segv_handler=1:"\
-                            "handle_segv=0:"\
-                            "allocator_may_return_null=1:"\
-                            kSAN_COMMON_ARCH":exitcode=" STR(HF_ASAN_EXIT_CODE)
-
-#define kUBSAN_OPTS         kSAN_COMMON_ARCH":exitcode=" STR(HF_UBSAN_EXIT_CODE)
-
-#define kMSAN_OPTS          "exit_code=" STR(HF_MSAN_EXIT_CODE) ":"\
-                            "wrap_signals=0:print_stats=1"
-
-/* 'log_path' ouput directory for sanitizer reports */
-#define kSANLOGDIR          "log_path="
-
-/* 'coverage_dir' output directory for coverage data files is set dynamically */
-#define kSANCOVDIR          "coverage_dir="
-
-/*
- * If the program ends with a signal that ASan does not handle (or can not
- * handle at all, like SIGKILL), coverage data will be lost. This is a big
- * problem on Android, where SIGKILL is a normal way of evicting applications
- * from memory. With 'coverage_direct=1' coverage data is written to a
- * memory-mapped file as soon as it collected. Non-Android targets can disable
- * coverage direct when more coverage data collection methods are implemented.
- */
-#if defined(__ANDROID__)
-#define kSAN_COV_OPTS  "coverage=1:coverage_direct=1"
-#else
-#define kSAN_COV_OPTS  "coverage=1:coverage_direct=1"
-#endif
-
-/* Last known pid of remote long-lived process to be monitored */
-static pid_t lastRemotePid = -1;
-
-static inline bool arch_shouldAttach(honggfuzz_t * hfuzz)
+static inline bool arch_shouldAttach(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 {
-    if (hfuzz->pid == 0) {
-        return true;
+    if (hfuzz->persistent && fuzzer->linux.attachedPid == fuzzer->pid) {
+        return false;
     }
-    if (hfuzz->pid > 0 && lastRemotePid != hfuzz->pid) {
-        return true;
+    if (hfuzz->linux.pid > 0 && fuzzer->linux.attachedPid == hfuzz->linux.pid) {
+        return false;
     }
-    return false;
+    return true;
 }
 
-pid_t arch_fork(honggfuzz_t * hfuzz)
+pid_t arch_fork(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 {
+    int sv[2];
+    if (hfuzz->persistent == true) {
+        close(fuzzer->linux.persistentSock);
+        if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == -1) {
+            LOG_F("socketpair(AF_UNIX, SOCK_STREAM)");
+            return -1;
+        }
+    }
+
     /*
      * We need to wait for the child to finish with wait() in case we're fuzzing
      * an external process
      */
-    uintptr_t clone_flags = 0;
-    if (hfuzz->pid) {
+    uintptr_t clone_flags = CLONE_UNTRACED;
+    if (hfuzz->linux.pid) {
         clone_flags = SIGCHLD;
     }
-    return syscall(__NR_clone, (uintptr_t) clone_flags, NULL, NULL, NULL, (uintptr_t) 0);
+
+    pid_t pid = syscall(__NR_clone, (uintptr_t) clone_flags, NULL, NULL, NULL, (uintptr_t) 0);
+
+    if (hfuzz->persistent == true) {
+        if (pid == -1) {
+            close(sv[0]);
+            close(sv[1]);
+        }
+        if (pid == 0) {
+            if (dup2(sv[1], 1023) == -1) {
+                LOG_F("dup2('%d', '%d')", sv[1], 1023);
+            }
+            close(sv[0]);
+            close(sv[1]);
+        }
+        if (pid > 0) {
+            fuzzer->linux.persistentSock = sv[0];
+            close(sv[1]);
+        }
+    }
+    return pid;
 }
 
 bool arch_launchChild(honggfuzz_t * hfuzz, char *fileName)
 {
+
     /*
      * Kill the children when fuzzer dies (e.g. due to Ctrl+C)
      */
@@ -155,49 +138,27 @@ bool arch_launchChild(honggfuzz_t * hfuzz, char *fileName)
         return false;
     }
 
-    /* Address Sanitizer (ASan) */
-    if (hfuzz->sanOpts.asanOpts) {
-        if (setenv("ASAN_OPTIONS", hfuzz->sanOpts.asanOpts, 1) == -1) {
-            PLOG_E("setenv(ASAN_OPTIONS) failed");
-            return false;
-        }
-    }
-
-    /* Memory Sanitizer (MSan) */
-    if (hfuzz->sanOpts.msanOpts) {
-        if (setenv("MSAN_OPTIONS", hfuzz->sanOpts.msanOpts, 1) == -1) {
-            PLOG_E("setenv(MSAN_OPTIONS) failed");
-            return false;
-        }
-    }
-
-    /* Undefined Behavior Sanitizer (UBSan) */
-    if (hfuzz->sanOpts.ubsanOpts) {
-        if (setenv("UBSAN_OPTIONS", hfuzz->sanOpts.ubsanOpts, 1) == -1) {
-            PLOG_E("setenv(UBSAN_OPTIONS) failed");
-            return false;
-        }
-    }
-
     /*
      * Disable ASLR
      */
-    if (hfuzz->disableRandomization && personality(ADDR_NO_RANDOMIZE) == -1) {
+    if (hfuzz->linux.disableRandomization && personality(ADDR_NO_RANDOMIZE) == -1) {
         PLOG_E("personality(ADDR_NO_RANDOMIZE) failed");
         return false;
     }
 #define ARGS_MAX 512
     char *args[ARGS_MAX + 2];
     char argData[PATH_MAX] = { 0 };
-    int x;
+    int x = 0;
 
     for (x = 0; x < ARGS_MAX && hfuzz->cmdline[x]; x++) {
-        if (!hfuzz->fuzzStdin && strcmp(hfuzz->cmdline[x], _HF_FILE_PLACEHOLDER) == 0) {
-            args[x] = fileName;
-        } else if (!hfuzz->fuzzStdin && strstr(hfuzz->cmdline[x], _HF_FILE_PLACEHOLDER)) {
+        if (!hfuzz->fuzzStdin && !hfuzz->persistent
+            && strcmp(hfuzz->cmdline[x], _HF_FILE_PLACEHOLDER) == 0) {
+            args[x] = (char *)fileName;
+        } else if (!hfuzz->fuzzStdin && !hfuzz->persistent
+                   && strstr(hfuzz->cmdline[x], _HF_FILE_PLACEHOLDER)) {
             const char *off = strstr(hfuzz->cmdline[x], _HF_FILE_PLACEHOLDER);
-            snprintf(argData, PATH_MAX, "%.*s%s", (int)(off - hfuzz->cmdline[x]), hfuzz->cmdline[x],
-                     fileName);
+            snprintf(argData, PATH_MAX, "%.*s%s", (int)(off - hfuzz->cmdline[x]),
+                     hfuzz->cmdline[x], fileName);
             args[x] = argData;
         } else {
             args[x] = hfuzz->cmdline[x];
@@ -206,54 +167,8 @@ bool arch_launchChild(honggfuzz_t * hfuzz, char *fileName)
 
     args[x++] = NULL;
 
-    LOG_D("Launching '%s' on file '%s'", args[0], fileName);
+    LOG_D("Launching '%s' on file '%s'", args[0], hfuzz->persistent ? "PERSISTENT_MODE" : fileName);
 
-    /*
-     * Set timeout (prof), real timeout (2*prof), and rlimit_cpu (2*prof)
-     */
-    if (hfuzz->tmOut) {
-        /*
-         * Set the CPU rlimit to twice the value of the time-out
-         */
-        struct rlimit rl = {
-            .rlim_cur = hfuzz->tmOut * 2,
-            .rlim_max = hfuzz->tmOut * 2,
-        };
-        if (setrlimit(RLIMIT_CPU, &rl) == -1) {
-            PLOG_E("Couldn't enforce the RLIMIT_CPU resource limit");
-            return false;
-        }
-    }
-
-    /*
-     * The address space limit. If big enough - roughly the size of RAM used
-     */
-    if (hfuzz->asLimit) {
-        struct rlimit64 rl = {
-            .rlim_cur = hfuzz->asLimit * 1024ULL * 1024ULL,
-            .rlim_max = hfuzz->asLimit * 1024ULL * 1024ULL,
-        };
-        if (prlimit64(0, RLIMIT_AS, &rl, NULL) == -1) {
-            PLOG_D("Couldn't enforce the RLIMIT_AS resource limit, ignoring");
-        }
-    }
-
-    for (size_t i = 0; i < ARRAYSIZE(hfuzz->envs) && hfuzz->envs[i]; i++) {
-        putenv(hfuzz->envs[i]);
-    }
-
-    if (hfuzz->nullifyStdio) {
-        util_nullifyStdio();
-    }
-
-    if (hfuzz->fuzzStdin) {
-        /*
-         * Uglyyyyyy ;)
-         */
-        if (!util_redirectStdin(fileName)) {
-            return false;
-        }
-    }
     /*
      * Wait for the ptrace to attach
      */
@@ -264,35 +179,31 @@ bool arch_launchChild(honggfuzz_t * hfuzz, char *fileName)
 #endif
     execvp(args[0], args);
 
-    util_recoverStdio();
-    LOG_F("Failed to create new '%s' process", args[0]);
+    PLOG_E("execvp('%s')", args[0]);
+
     return false;
 }
 
 static void arch_sigFunc(int signo, siginfo_t * si UNUSED, void *dummy UNUSED)
 {
-    if (signo != SIGALRM) {
-        LOG_E("Signal != SIGALRM (%d)", signo);
+    if (signo != SIGNAL_TIMER) {
+        LOG_E("Signal != SIGNAL_TIMER (%d)", signo);
     }
 }
 
 static void arch_removeTimer(timer_t * timerid)
 {
-    timer_delete(*timerid);
+    const struct itimerspec ts = {
+        .it_value = {.tv_sec = 0,.tv_nsec = 0},
+        .it_interval = {.tv_sec = 0,.tv_nsec = 0,},
+    };
+    if (timer_settime(*timerid, 0, &ts, NULL) == -1) {
+        PLOG_E("timer_settime(disarm)");
+    }
 }
 
 static bool arch_setTimer(timer_t * timerid)
 {
-    struct sigevent sevp = {
-        .sigev_value.sival_ptr = timerid,
-        .sigev_signo = SIGALRM,
-        .sigev_notify = SIGEV_THREAD_ID | SIGEV_SIGNAL,
-        ._sigev_un._tid = syscall(__NR_gettid),
-    };
-    if (timer_create(CLOCK_REALTIME, &sevp, timerid) == -1) {
-        PLOG_E("timer_create(CLOCK_REALTIME) failed");
-        return false;
-    }
     /*
      * Kick in every 200ms, starting with the next second
      */
@@ -301,21 +212,8 @@ static bool arch_setTimer(timer_t * timerid)
         .it_interval = {.tv_sec = 0,.tv_nsec = 200000000,},
     };
     if (timer_settime(*timerid, 0, &ts, NULL) == -1) {
-        PLOG_E("timer_settime() failed");
+        PLOG_E("timer_settime(arm) failed");
         timer_delete(*timerid);
-        return false;
-    }
-    sigset_t smask;
-    sigemptyset(&smask);
-    struct sigaction sa = {
-        .sa_handler = NULL,
-        .sa_sigaction = arch_sigFunc,
-        .sa_mask = smask,
-        .sa_flags = SA_SIGINFO,
-        .sa_restorer = NULL,
-    };
-    if (sigaction(SIGALRM, &sa, NULL) == -1) {
-        PLOG_E("sigaction(SIGALRM) failed");
         return false;
     }
 
@@ -330,68 +228,95 @@ static void arch_checkTimeLimit(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
         LOG_W("PID %d took too much time (limit %ld s). Sending SIGKILL",
               fuzzer->pid, hfuzz->tmOut);
         kill(fuzzer->pid, SIGKILL);
-        __sync_fetch_and_add(&hfuzz->timeoutedCnt, 1UL);
+        ATOMIC_POST_INC(hfuzz->timeoutedCnt);
     }
+}
+
+static bool arch_persistentModeRoundDone(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
+{
+    if (hfuzz->persistent == false) {
+        return false;
+    }
+    char z;
+    if (recv(fuzzer->linux.persistentSock, &z, sizeof(z), MSG_DONTWAIT) == sizeof(z)) {
+        LOG_D("Persistent mode round finished");
+        return true;
+    }
+    return false;
+}
+
+static bool arch_persistentSendFile(fuzzer_t * fuzzer)
+{
+    uint32_t len = (uint64_t) fuzzer->dynamicFileSz;
+    if (files_writeToFd(fuzzer->linux.persistentSock, (uint8_t *) & len, sizeof(len)) == false) {
+        return false;
+    }
+    if (files_writeToFd(fuzzer->linux.persistentSock, fuzzer->dynamicFile, fuzzer->dynamicFileSz) ==
+        false) {
+        return false;
+    }
+    return true;
 }
 
 void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 {
-    pid_t ptracePid = (hfuzz->pid > 0) ? hfuzz->pid : fuzzer->pid;
+    pid_t ptracePid = (hfuzz->linux.pid > 0) ? hfuzz->linux.pid : fuzzer->pid;
     pid_t childPid = fuzzer->pid;
 
-    timer_t timerid;
-    if (arch_setTimer(&timerid) == false) {
+    if (arch_setTimer(&(fuzzer->linux.timerId)) == false) {
         LOG_F("Couldn't set timer");
     }
 
-    if (arch_ptraceWaitForPidStop(childPid) == false) {
+    if (hfuzz->persistent == false && arch_ptraceWaitForPidStop(childPid) == false) {
         LOG_F("PID %d not in a stopped state", childPid);
     }
-    LOG_D("PID: %d is in a stopped state now", childPid);
 
-    if (arch_shouldAttach(hfuzz) == true) {
+    if (arch_shouldAttach(hfuzz, fuzzer) == true) {
         if (arch_ptraceAttach(ptracePid) == false) {
             LOG_F("arch_ptraceAttach(pid=%d) failed", ptracePid);
         }
-        /* In case we fuzz a long-lived process attach to it once only */
-        if (ptracePid != childPid) {
-            lastRemotePid = ptracePid;
-        }
+        fuzzer->linux.attachedPid = ptracePid;
     }
-    /* A long-lived processed could have already exited, and we wouldn't know */
+    /* A long-lived process could have already exited, and we wouldn't know */
     if (kill(ptracePid, 0) == -1) {
-        if (hfuzz->pidFile) {
+        if (hfuzz->linux.pidFile) {
             /* If pid from file, check again for cases of auto-restart daemons that update it */
-            /* 
+            /*
              * TODO: Investigate if we need to delay here, so that target process has
              * enough time to restart. Tricky to answer since is target dependant.
              */
-            if (files_readPidFromFile(hfuzz->pidFile, &hfuzz->pid) == false) {
+            if (files_readPidFromFile(hfuzz->linux.pidFile, &hfuzz->linux.pid) == false) {
                 LOG_F("Failed to read new PID from file - abort");
             } else {
-                if (kill(hfuzz->pid, 0) == -1) {
-                    PLOG_F("Liveness of PID %d read from file questioned - abort", hfuzz->pid);
+                if (kill(hfuzz->linux.pid, 0) == -1) {
+                    PLOG_F("Liveness of PID %d read from file questioned - abort",
+                           hfuzz->linux.pid);
                 } else {
-                    LOG_D("Monitor PID has been updated (pid=%d)", hfuzz->pid);
-                    ptracePid = hfuzz->pid;
+                    LOG_D("Monitor PID has been updated (pid=%d)", hfuzz->linux.pid);
+                    ptracePid = hfuzz->linux.pid;
                 }
             }
-        } else {
-            PLOG_F("Liveness of %d questioned - abort", ptracePid);
         }
     }
 
     perfFd_t perfFds;
-    if (arch_perfEnable(ptracePid, hfuzz, &perfFds) == false) {
+    if (arch_perfEnable(ptracePid, hfuzz, fuzzer, &perfFds) == false) {
         LOG_F("Couldn't enable perf counters for pid %d", ptracePid);
     }
     if (kill(childPid, SIGCONT) == -1) {
         PLOG_F("Restarting PID: %d failed", childPid);
     }
+    if (hfuzz->persistent == true && arch_persistentSendFile(fuzzer) == false) {
+        LOG_W("Could not send file contents to the persistent process");
+    }
 
     for (;;) {
+        if (arch_persistentModeRoundDone(hfuzz, fuzzer)) {
+            break;
+        }
+
         int status;
-        pid_t pid = wait4(-1, &status, __WALL | __WNOTHREAD, NULL);
+        pid_t pid = wait4(-1, &status, __WALL | __WNOTHREAD | WUNTRACED, NULL);
         if (pid == -1 && errno == EINTR) {
             if (hfuzz->tmOut) {
                 arch_checkTimeLimit(hfuzz, fuzzer);
@@ -405,10 +330,20 @@ void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
         if (pid == -1) {
             PLOG_F("wait4() failed");
         }
-        LOG_D("PID '%d' returned with status '%d'", pid, status);
 
-        arch_ptraceGetCustomPerf(hfuzz, ptracePid, &fuzzer->hwCnts.customCnt);
+        char statusStr[4096];
+        LOG_D("PID '%d' returned with status: %s", pid,
+              subproc_StatusToStr(status, statusStr, sizeof(statusStr)));
 
+        arch_ptraceGetCustomPerf(hfuzz, ptracePid, &fuzzer->linux.hwCnts.customCnt);
+
+        if (hfuzz->persistent && pid == fuzzer->persistentPid
+            && (WIFEXITED(status) || WIFSIGNALED(status))) {
+            fuzzer->persistentPid = 0;
+            LOG_W("Persistent mode: PID %d exited with status: %s", pid,
+                  subproc_StatusToStr(status, statusStr, sizeof(statusStr)));
+            break;
+        }
         if (ptracePid == childPid) {
             arch_ptraceAnalyze(hfuzz, status, pid, fuzzer);
             continue;
@@ -444,13 +379,18 @@ void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
     }
 #endif
 
-    arch_removeTimer(&timerid);
+    arch_removeTimer(&fuzzer->linux.timerId);
     arch_perfAnalyze(hfuzz, fuzzer, &perfFds);
-    arch_sanCovAnalyze(hfuzz, fuzzer);
+    sancov_Analyze(hfuzz, fuzzer);
 }
 
 bool arch_archInit(honggfuzz_t * hfuzz)
 {
+    if (hfuzz->dynFileMethod &
+        (_HF_DYNFILE_BTS_BLOCK | _HF_DYNFILE_BTS_EDGE | _HF_DYNFILE_IPT_BLOCK)) {
+        hfuzz->bbMap = util_MMap(_HF_PERF_BITMAP_SIZE);
+    }
+
     /* We use execvp() as a fall-back mechanism (using PATH), so it might legitimately fail */
     hfuzz->exeFd = open(hfuzz->cmdline[0], O_RDONLY | O_CLOEXEC);
 
@@ -517,39 +457,39 @@ bool arch_archInit(honggfuzz_t * hfuzz)
 #endif
 
     /* If read PID from file enable - read current value */
-    if (hfuzz->pidFile) {
-        if (files_readPidFromFile(hfuzz->pidFile, &hfuzz->pid) == false) {
+    if (hfuzz->linux.pidFile) {
+        if (files_readPidFromFile(hfuzz->linux.pidFile, &hfuzz->linux.pid) == false) {
             LOG_E("Failed to read PID from file");
             return false;
         }
     }
 
     /* If remote pid, resolve command using procfs */
-    if (hfuzz->pid > 0) {
+    if (hfuzz->linux.pid > 0) {
         char procCmd[PATH_MAX] = { 0 };
-        snprintf(procCmd, sizeof(procCmd), "/proc/%d/cmdline", hfuzz->pid);
+        snprintf(procCmd, sizeof(procCmd), "/proc/%d/cmdline", hfuzz->linux.pid);
 
-        hfuzz->pidCmd = malloc(_HF_PROC_CMDLINE_SZ * sizeof(char));
-        if (!hfuzz->pidCmd) {
+        hfuzz->linux.pidCmd = malloc(_HF_PROC_CMDLINE_SZ * sizeof(char));
+        if (!hfuzz->linux.pidCmd) {
             PLOG_E("malloc(%zu) failed", (size_t) _HF_PROC_CMDLINE_SZ);
             return false;
         }
 
-        size_t sz =
-            files_readFileToBufMax(procCmd, (uint8_t *) hfuzz->pidCmd, _HF_PROC_CMDLINE_SZ - 1);
-        if (sz == 0) {
+        ssize_t sz = files_readFileToBufMax(procCmd, (uint8_t *) hfuzz->linux.pidCmd,
+                                            _HF_PROC_CMDLINE_SZ - 1);
+        if (sz < 1) {
             LOG_E("Couldn't read '%s'", procCmd);
-            free(hfuzz->pidCmd);
+            free(hfuzz->linux.pidCmd);
             return false;
         }
 
         /* Make human readable */
-        for (size_t i = 0; i < (sz - 1); i++) {
-            if (hfuzz->pidCmd[i] == '\0') {
-                hfuzz->pidCmd[i] = ' ';
+        for (size_t i = 0; i < ((size_t) sz - 1); i++) {
+            if (hfuzz->linux.pidCmd[i] == '\0') {
+                hfuzz->linux.pidCmd[i] = ' ';
             }
         }
-        hfuzz->pidCmd[sz] = '\0';
+        hfuzz->linux.pidCmd[sz] = '\0';
     }
 
     /*
@@ -557,126 +497,45 @@ bool arch_archInit(honggfuzz_t * hfuzz)
      * will be occupied with sanitizer symbols if 'abort_on_error' flag is set
      */
 #if _HF_MONITOR_SIGABRT
-    hfuzz->numMajorFrames = 14;
+    hfuzz->linux.numMajorFrames = 14;
 #endif
 
-    /* 
-     * If monitoring remote process don't adjust sanitizer flags for spawned workers. It
-     * is user's responsibility to spawn remote process with correct flags & path for data
-     * files aligned with workspace expected dir.
-     */
-    if (hfuzz->pid > 0) {
-        return true;
-    }
+    return true;
+}
 
-    /* If sanitizer coverage enabled init workspace subdir */
-    if (hfuzz->useSanCov) {
-        char sanCovOutDir[PATH_MAX] = { 0 };
-        snprintf(sanCovOutDir, sizeof(sanCovOutDir), "%s/%s", hfuzz->workDir, _HF_SANCOV_DIR);
-        if (!files_exists(sanCovOutDir)) {
-            if (mkdir(sanCovOutDir, S_IRWXU | S_IXGRP | S_IXOTH) != 0) {
-                PLOG_E("mkdir() '%s' failed", sanCovOutDir);
-            }
-        }
-    }
-
-    /* Set sanitizer flags once to avoid performance overhead per worker spawn */
-    size_t flagsSz = 0;
-    size_t bufSz = sizeof(kASAN_OPTS) + (2 * PATH_MAX); // Larger constant + 2 dynamic paths
-    char *san_opts = malloc(bufSz);
-    if (san_opts == NULL) {
-        PLOG_E("malloc(%zu) failed", bufSz);
+bool arch_archThreadInit(honggfuzz_t * hfuzz UNUSED, fuzzer_t * fuzzer)
+{
+    struct sigevent sevp = {
+        .sigev_value.sival_ptr = &fuzzer->linux.timerId,
+        .sigev_signo = SIGNAL_TIMER,
+        .sigev_notify = SIGEV_THREAD_ID | SIGEV_SIGNAL,
+        ._sigev_un._tid = syscall(__NR_gettid),
+    };
+    if (timer_create(CLOCK_REALTIME, &sevp, &fuzzer->linux.timerId) == -1) {
+        PLOG_E("timer_create(CLOCK_REALTIME) failed");
         return false;
     }
 
-    /* AddressSanitizer (ASan) */
-    memset(san_opts, 0, bufSz);
-    if (hfuzz->useSanCov) {
-#if !_HF_MONITOR_SIGABRT
-        /* Write reports in FS only if abort_on_error is disabled */
-        snprintf(san_opts, bufSz, "%s:%s:%s%s/%s:%s%s/%s", kASAN_OPTS, kSAN_COV_OPTS,
-                 kSANCOVDIR, hfuzz->workDir, _HF_SANCOV_DIR, kSANLOGDIR, hfuzz->workDir,
-                 kLOGPREFIX);
-#else
-        snprintf(san_opts, bufSz, "%s:%s:%s%s/%s", kASAN_OPTS, kSAN_COV_OPTS,
-                 kSANCOVDIR, hfuzz->workDir, _HF_SANCOV_DIR);
-#endif
-    } else {
-        snprintf(san_opts, bufSz, "%s:%s%s/%s", kASAN_OPTS, kSANLOGDIR, hfuzz->workDir, kLOGPREFIX);
-    }
+    sigset_t smask;
+    sigemptyset(&smask);
+    struct sigaction sa = {
+        .sa_handler = NULL,
+        .sa_sigaction = arch_sigFunc,
+        .sa_mask = smask,
+        .sa_flags = SA_SIGINFO,
+        .sa_restorer = NULL,
+    };
 
-    flagsSz = strlen(san_opts) + 1;
-    hfuzz->sanOpts.asanOpts = malloc(flagsSz);
-    if (hfuzz->sanOpts.asanOpts == NULL) {
-        PLOG_E("malloc(%zu) failed", flagsSz);
-        free(san_opts);
+    sigset_t ss;
+    sigemptyset(&ss);
+    sigaddset(&ss, SIGNAL_TIMER);
+    if (sigprocmask(SIG_UNBLOCK, &ss, NULL) != 0) {
+        PLOG_F("pthread_sigmask(%d, SIG_UNBLOCK)", SIGNAL_TIMER);
+    }
+    if (sigaction(SIGNAL_TIMER, &sa, NULL) == -1) {
+        PLOG_E("sigaction(SIGNAL_TIMER (%d)) failed", SIGNAL_TIMER);
         return false;
     }
-    memset(hfuzz->sanOpts.asanOpts, 0, flagsSz);
-    memcpy(hfuzz->sanOpts.asanOpts, san_opts, flagsSz);
-    LOG_D("ASAN_OPTIONS=%s", hfuzz->sanOpts.asanOpts);
 
-    /* Undefined Behavior (UBSan) */
-    memset(san_opts, 0, bufSz);
-    if (hfuzz->useSanCov) {
-#if !_HF_MONITOR_SIGABRT
-        /* Write reports in FS only if abort_on_error is disabled */
-        snprintf(san_opts, bufSz, "%s:%s:%s%s/%s:%s%s/%s", kUBSAN_OPTS, kSAN_COV_OPTS,
-                 kSANCOVDIR, hfuzz->workDir, _HF_SANCOV_DIR, kSANLOGDIR, hfuzz->workDir,
-                 kLOGPREFIX);
-#else
-        snprintf(san_opts, bufSz, "%s:%s:%s%s/%s", kUBSAN_OPTS, kSAN_COV_OPTS,
-                 kSANCOVDIR, hfuzz->workDir, _HF_SANCOV_DIR);
-#endif
-    } else {
-        snprintf(san_opts, bufSz, "%s:%s%s/%s", kUBSAN_OPTS, kSANLOGDIR, hfuzz->workDir,
-                 kLOGPREFIX);
-    }
-
-    flagsSz = strlen(san_opts) + 1;
-    hfuzz->sanOpts.ubsanOpts = malloc(flagsSz);
-    if (hfuzz->sanOpts.ubsanOpts == NULL) {
-        PLOG_E("malloc(%zu) failed", flagsSz);
-        free(san_opts);
-        return false;
-    }
-    memset(hfuzz->sanOpts.ubsanOpts, 0, flagsSz);
-    memcpy(hfuzz->sanOpts.ubsanOpts, san_opts, flagsSz);
-    LOG_D("UBSAN_OPTIONS=%s", hfuzz->sanOpts.ubsanOpts);
-
-    /* MemorySanitizer (MSan) */
-    memset(san_opts, 0, bufSz);
-    const char *msan_reports_flag = "report_umrs=0";
-    if (hfuzz->msanReportUMRS) {
-        msan_reports_flag = "report_umrs=1";
-    }
-
-    if (hfuzz->useSanCov) {
-#if !_HF_MONITOR_SIGABRT
-        /* Write reports in FS only if abort_on_error is disabled */
-        snprintf(san_opts, bufSz, "%s:%s:%s:%s%s/%s:%s%s/%s", kMSAN_OPTS, msan_reports_flag,
-                 kSAN_COV_OPTS, kSANCOVDIR, hfuzz->workDir, _HF_SANCOV_DIR, kSANLOGDIR,
-                 hfuzz->workDir, kLOGPREFIX);
-#else
-        snprintf(san_opts, bufSz, "%s:%s:%s:%s%s/%s", kMSAN_OPTS, msan_reports_flag,
-                 kSAN_COV_OPTS, kSANCOVDIR, hfuzz->workDir, _HF_SANCOV_DIR);
-#endif
-    } else {
-        snprintf(san_opts, bufSz, "%s:%s:%s%s/%s", kMSAN_OPTS, msan_reports_flag, kSANLOGDIR,
-                 hfuzz->workDir, kLOGPREFIX);
-    }
-
-    flagsSz = strlen(san_opts) + 1;
-    hfuzz->sanOpts.msanOpts = malloc(flagsSz);
-    if (hfuzz->sanOpts.msanOpts == NULL) {
-        PLOG_E("malloc(%zu) failed", flagsSz);
-        free(san_opts);
-        return false;
-    }
-    memset(hfuzz->sanOpts.msanOpts, 0, flagsSz);
-    memcpy(hfuzz->sanOpts.msanOpts, san_opts, flagsSz);
-    LOG_D("MSAN_OPTIONS=%s", hfuzz->sanOpts.msanOpts);
-
-    free(san_opts);
     return true;
 }
