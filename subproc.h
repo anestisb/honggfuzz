@@ -1,7 +1,11 @@
 /*
  *
- * honggfuzz - sanitizer coverage feedback parsing
- * -----------------------------------------------
+ * honggfuzz - routines dealing with subprocesses
+ * -----------------------------------------
+ *
+ * Author: Robert Swiecki <swiecki@google.com>
+ *
+ * Copyright 2010-2015 by Google Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -17,9 +21,9 @@
  *
  */
 
-#ifndef _HF_LINUX_SANCOV_H_
-#define _HF_LINUX_SANCOV_H_
+#ifndef _HF_SUBPROC_H_
+#define _HF_SUBPROC_H_
 
-extern void arch_sanCovAnalyze(honggfuzz_t * hfuzz, fuzzer_t * fuzzer);
+extern const char *subproc_StatusToStr(int status, char *str, size_t len);
 
-#endif                          /* _HF_LINUX_SANCOV_H_ */
+#endif

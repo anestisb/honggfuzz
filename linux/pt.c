@@ -170,9 +170,9 @@ inline static int pt_last_ip_update_ip(struct pt_last_ip *last_ip,
     return -pte_bad_packet;
 }
 
-inline static void perf_ptAnalyzePkt(struct pt_packet *packet, struct pt_config *ptc,
-                                     struct pt_last_ip *last_ip, void (*add_branch) (uint64_t from,
-                                                                                     uint64_t to))
+inline static void perf_ptAnalyzePkt(honggfuzz_t * hfuzz, fuzzer_t * fuzzer,
+                                     struct pt_packet *packet, struct pt_config *ptc,
+                                     struct pt_last_ip *last_ip)
 {
     switch (packet->type) {
     case ppt_tip:
@@ -194,20 +194,27 @@ inline static void perf_ptAnalyzePkt(struct pt_packet *packet, struct pt_config 
     if (errcode < 0) {
         return;
     }
-
-/* Update only on TIP, other packets don't indicate a branch */
+    /* Update only on TIP, other packets don't indicate a branch */
     if (packet->type == ppt_tip) {
-        add_branch(ip, 0UL);
+        register size_t pos = ip % (hfuzz->bbMapSz * 8);
+        size_t byteOff = pos / 8;
+        uint8_t bitSet = (uint8_t) (1 << (pos % 8));
+        register uint8_t prev = ATOMIC_POST_OR(hfuzz->bbMap[byteOff], bitSet);
+        if (!(prev & bitSet)) {
+            fuzzer->linux.hwCnts.bbCnt++;
+        }
     }
+    return;
 }
 
-void arch_ptAnalyze(struct perf_event_mmap_page *pem, uint8_t * auxBuf,
-                    void (*add_branch) (uint64_t from, uint64_t to))
+void arch_ptAnalyze(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 {
+    struct perf_event_mmap_page *pem = (struct perf_event_mmap_page *)fuzzer->linux.perfMmapBuf;
+
     struct pt_config ptc;
     pt_config_init(&ptc);
-    ptc.begin = &auxBuf[pem->aux_tail];
-    ptc.end = &auxBuf[pem->aux_head - 1];
+    ptc.begin = &fuzzer->linux.perfMmapAux[pem->aux_tail];
+    ptc.end = &fuzzer->linux.perfMmapAux[pem->aux_head - 1];
 
     int errcode = pt_cpu_errata(&ptc.errata, &ptc.cpu);
     if (errcode < 0) {
@@ -218,6 +225,9 @@ void arch_ptAnalyze(struct perf_event_mmap_page *pem, uint8_t * auxBuf,
     if (ptd == NULL) {
         LOG_F("pt_pkt_alloc_decoder() failed");
     }
+    defer {
+        pt_pkt_free_decoder(ptd);
+    };
 
     errcode = pt_pkt_sync_forward(ptd);
     if (errcode < 0) {
@@ -235,18 +245,15 @@ void arch_ptAnalyze(struct perf_event_mmap_page *pem, uint8_t * auxBuf,
         }
         if (errcode < 0) {
             LOG_W("pt_pkt_next() failed: %s", pt_errstr(errcode));
-            return;
+            break;
         }
-        perf_ptAnalyzePkt(&packet, &ptc, &last_ip, add_branch);
+        perf_ptAnalyzePkt(hfuzz, fuzzer, &packet, &ptc, &last_ip);
     }
-
-    pt_pkt_free_decoder(ptd);
 }
 
 #else                           /* _HF_LINUX_INTEL_PT_LIB */
 
-void arch_ptAnalyze(struct perf_event_mmap_page *pem UNUSED, uint8_t * auxBuf UNUSED,
-                    void (*add_branch) (uint64_t from, uint64_t to) UNUSED)
+void arch_ptAnalyze(honggfuzz_t * hfuzz UNUSED, fuzzer_t * fuzzer UNUSED)
 {
     LOG_F
         ("The program has not been linked against the Intel's Processor Trace Library (libipt.so)");

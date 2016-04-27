@@ -81,7 +81,7 @@ void report_Report(honggfuzz_t * hfuzz, char *s)
             snprintf(reportFName, sizeof(reportFName), "%s", hfuzz->reportFile);
         }
 
-        reportFD = open(reportFName, O_WRONLY | O_CREAT | O_APPEND, 0644);
+        reportFD = open(reportFName, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
         if (reportFD == -1) {
             PLOG_F("Couldn't open('%s') for writing", reportFName);
         }
@@ -105,14 +105,14 @@ void report_Report(honggfuzz_t * hfuzz, char *s)
             " targetCmd    : %s\n"
             " wordlistFile : %s\n",
             localtmstr,
-            hfuzz->flipRate,
+            hfuzz->origFlipRate,
             hfuzz->externalCommand == NULL ? "NULL" : hfuzz->externalCommand,
             hfuzz->fuzzStdin ? "TRUE" : "FALSE",
             hfuzz->tmOut,
-            hfuzz->ignoreAddr,
+            hfuzz->linux.ignoreAddr,
             hfuzz->asLimit,
-            hfuzz->pid, hfuzz->pidCmd,
-            hfuzz->dictionaryFile == NULL ? "NULL" : hfuzz->dictionaryFile);
+            hfuzz->linux.pid,
+            hfuzz->linux.pidCmd, hfuzz->dictionaryFile == NULL ? "NULL" : hfuzz->dictionaryFile);
 
 #if defined(_HF_ARCH_LINUX)
     report_printdynFileMethod(hfuzz);

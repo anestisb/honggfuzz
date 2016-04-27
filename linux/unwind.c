@@ -24,14 +24,10 @@
 #include "common.h"
 #include "linux/unwind.h"
 
-#include <string.h>
+#include <endian.h>
 #include <libunwind-ptrace.h>
 
 #include "log.h"
-
-#if defined(__ANDROID__)
-#include <sys/endian.h>         /* For __BYTE_ORDER */
-#endif
 
 /*
  * WARNING: Ensure that _UPT-info structs are not shared between threads
@@ -57,25 +53,30 @@ static const char *UNW_ER[] = {
 size_t arch_unwindStack(pid_t pid, funcs_t * funcs)
 {
     size_t num_frames = 0;
-    void *ui = NULL;
 
     unw_addr_space_t as = unw_create_addr_space(&_UPT_accessors, __BYTE_ORDER);
     if (!as) {
         LOG_E("[pid='%d'] unw_create_addr_space failed", pid);
-        goto out;
+        return num_frames;
     }
+    defer {
+        unw_destroy_addr_space(as);
+    };
 
-    ui = _UPT_create(pid);
+    void *ui = _UPT_create(pid);
     if (ui == NULL) {
         LOG_E("[pid='%d'] _UPT_create failed", pid);
-        goto out;
+        return num_frames;
     }
+    defer {
+        _UPT_destroy(ui);
+    };
 
     unw_cursor_t c;
     int ret = unw_init_remote(&c, as, ui);
     if (ret < 0) {
         LOG_E("[pid='%d'] unw_init_remote failed (%s)", pid, UNW_ER[-ret]);
-        goto out;
+        return num_frames;
     }
 
     for (num_frames = 0; unw_step(&c) > 0 && num_frames < _HF_MAX_FUNCS; num_frames++) {
@@ -88,9 +89,6 @@ size_t arch_unwindStack(pid_t pid, funcs_t * funcs)
             funcs[num_frames].pc = (void *)ip;
     }
 
- out:
-    ui ? _UPT_destroy(ui) : 0;
-    as ? unw_destroy_addr_space(as) : 0;
     return num_frames;
 }
 
@@ -98,26 +96,29 @@ size_t arch_unwindStack(pid_t pid, funcs_t * funcs)
 size_t arch_unwindStack(pid_t pid, funcs_t * funcs)
 {
     size_t num_frames = 0;
-    struct UPT_info *ui = NULL;
-    unw_addr_space_t as = NULL;
-
-    as = unw_create_addr_space(&_UPT_accessors, __BYTE_ORDER);
+    unw_addr_space_t as = unw_create_addr_space(&_UPT_accessors, __BYTE_ORDER);
     if (!as) {
         LOG_E("[pid='%d'] unw_create_addr_space failed", pid);
-        goto out;
+        return num_frames;
     }
+    defer {
+        unw_destroy_addr_space(as);
+    };
 
-    ui = (struct UPT_info *)_UPT_create(pid);
+    struct UPT_info *ui = (struct UPT_info *)_UPT_create(pid);
     if (ui == NULL) {
         LOG_E("[pid='%d'] _UPT_create failed", pid);
-        goto out;
+        return num_frames;
     }
+    defer {
+        _UPT_destroy(ui);
+    };
 
     unw_cursor_t cursor;
     int ret = unw_init_remote(&cursor, as, ui);
     if (ret < 0) {
         LOG_E("[pid='%d'] unw_init_remote failed (%s)", pid, UNW_ER[-ret]);
-        goto out;
+        return num_frames;
     }
 
     do {
@@ -158,13 +159,6 @@ size_t arch_unwindStack(pid_t pid, funcs_t * funcs)
 
         ret = unw_step(&cursor);
     } while (ret > 0 && num_frames < _HF_MAX_FUNCS);
-
- out:
-    ui ? _UPT_destroy(ui) : NULL;
-    as ? unw_destroy_addr_space(as) : NULL;
-
-    ui = NULL;
-    as = NULL;
 
     return num_frames;
 }

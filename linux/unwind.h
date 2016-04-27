@@ -24,6 +24,13 @@
 #ifndef _HF_LINUX_UNWIND_H_
 #define _HF_LINUX_UNWIND_H_
 
+#define _HF_MAX_FUNCS 80
+typedef struct {
+    void *pc;
+    char func[_HF_FUNC_NAME_SZ];
+    size_t line;
+} funcs_t;
+
 extern size_t arch_unwindStack(pid_t pid, funcs_t * funcs);
 extern char *arch_btContainsBLSymbol(honggfuzz_t * hfuzz, size_t num_frames, funcs_t * funcs);
 extern char *arch_btContainsWLSymbol(honggfuzz_t * hfuzz, size_t num_frames, funcs_t * funcs);

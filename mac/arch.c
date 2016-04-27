@@ -35,6 +35,7 @@
 #include <string.h>
 #include <sys/cdefs.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -42,9 +43,11 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "log.h"
-#include "util.h"
 #include "files.h"
+#include "log.h"
+#include "sancov.h"
+#include "subproc.h"
+#include "util.h"
 
 #include <servers/bootstrap.h>
 #include <mach/mach.h>
@@ -157,6 +160,10 @@ static bool arch_analyzeSignal(honggfuzz_t * hfuzz, int status, fuzzer_t * fuzze
         return false;
     }
 
+    if (WIFEXITED(status) || WIFSIGNALED(status)) {
+        sancov_Analyze(hfuzz, fuzzer);
+    }
+
     /*
      * Boring, the process just exited
      */
@@ -194,7 +201,7 @@ static bool arch_analyzeSignal(honggfuzz_t * hfuzz, int status, fuzzer_t * fuzze
     fuzzer->backtrace = g_fuzzer_crash_information[fuzzer->pid].backtrace;
 
     /* If dry run mode, copy file with same name into workspace */
-    if (hfuzz->flipRate == 0.0L && hfuzz->useVerifier) {
+    if (hfuzz->origFlipRate == 0.0L && hfuzz->useVerifier) {
         snprintf(fuzzer->crashFileName, sizeof(fuzzer->crashFileName), "%s/%s",
                  hfuzz->workDir, fuzzer->origFileName);
     } else if (hfuzz->saveUnique) {
@@ -217,7 +224,7 @@ static bool arch_analyzeSignal(honggfuzz_t * hfuzz, int status, fuzzer_t * fuzze
     /*
      * Increase crashes counter presented by ASCII display
      */
-    __sync_fetch_and_add(&hfuzz->crashesCnt, 1UL);
+    ATOMIC_POST_INC(hfuzz->crashesCnt);
 
     /*
      * Check if stackhash is blacklisted
@@ -225,31 +232,27 @@ static bool arch_analyzeSignal(honggfuzz_t * hfuzz, int status, fuzzer_t * fuzze
     if (hfuzz->blacklist
         && (fastArray64Search(hfuzz->blacklist, hfuzz->blacklistCnt, fuzzer->backtrace) != -1)) {
         LOG_I("Blacklisted stack hash '%" PRIx64 "', skipping", fuzzer->backtrace);
-        __sync_fetch_and_add(&hfuzz->blCrashesCnt, 1UL);
+        ATOMIC_POST_INC(hfuzz->blCrashesCnt);
         return true;
     }
 
-    bool dstFileExists = false;
-    if (files_copyFile(fuzzer->fileName, fuzzer->crashFileName, &dstFileExists)) {
-        LOG_I("Ok, that's interesting, saved '%s' as '%s'", fuzzer->fileName,
-              fuzzer->crashFileName);
-        // Unique crashes
-        __sync_fetch_and_add(&hfuzz->uniqueCrashesCnt, 1UL);
-    } else {
-        if (dstFileExists) {
-            LOG_I("It seems that '%s' already exists, skipping", fuzzer->crashFileName);
-
-            // Clear filename so that verifier can understand we hit a duplicate
-            memset(fuzzer->crashFileName, 0, sizeof(fuzzer->crashFileName));
-        } else {
-            LOG_E("Couldn't copy '%s' to '%s'", fuzzer->fileName, fuzzer->crashFileName);
-        }
+    if (files_writeBufToFile
+        (fuzzer->crashFileName, fuzzer->dynamicFile, fuzzer->dynamicFileSz,
+         O_CREAT | O_EXCL | O_WRONLY) == false) {
+        LOG_E("Couldn't copy '%s' to '%s'", fuzzer->fileName, fuzzer->crashFileName);
+        return true;
     }
+
+    LOG_I("Ok, that's interesting, saved '%s' as '%s'", fuzzer->fileName, fuzzer->crashFileName);
+
+    ATOMIC_POST_INC(hfuzz->uniqueCrashesCnt);
+    /* If unique crash found, reset dynFile counter */
+    ATOMIC_CLEAR(hfuzz->dynFileIterExpire);
 
     return true;
 }
 
-pid_t arch_fork(honggfuzz_t * hfuzz UNUSED)
+pid_t arch_fork(honggfuzz_t * hfuzz UNUSED, fuzzer_t * fuzzer UNUSED)
 {
     return fork();
 }
@@ -307,87 +310,7 @@ bool arch_launchChild(honggfuzz_t * hfuzz, char *fileName)
         return false;
     }
 
-    /*
-     * Set timeout (prof), real timeout (2*prof), and rlimit_cpu (2*prof)
-     */
-    if (hfuzz->tmOut) {
-        struct itimerval it;
-
-        /*
-         * The hfuzz->tmOut is real CPU usage time...
-         */
-        it.it_value.tv_sec = hfuzz->tmOut;
-        it.it_value.tv_usec = 0;
-        it.it_interval.tv_sec = 0;
-        it.it_interval.tv_usec = 0;
-        if (setitimer(ITIMER_PROF, &it, NULL) == -1) {
-            PLOG_E("Couldn't set the ITIMER_PROF timer");
-            return false;
-        }
-
-        /*
-         * ...so, if a process sleeps, this one should
-         * trigger a signal...
-         */
-        it.it_value.tv_sec = hfuzz->tmOut;
-        it.it_value.tv_usec = 0;
-        it.it_interval.tv_sec = 0;
-        it.it_interval.tv_usec = 0;
-        if (setitimer(ITIMER_REAL, &it, NULL) == -1) {
-            PLOG_E("Couldn't set the ITIMER_REAL timer");
-            return false;
-        }
-
-        /*
-         * ..if a process sleeps and catches SIGPROF/SIGALRM
-         * rlimits won't help either. However, arch_checkTimeLimit
-         * will send a SIGKILL at tmOut + 2 seconds. That should
-         * do it :)
-         */
-        struct rlimit rl;
-
-        rl.rlim_cur = hfuzz->tmOut + 1;
-        rl.rlim_max = hfuzz->tmOut + 1;
-        if (setrlimit(RLIMIT_CPU, &rl) == -1) {
-            PLOG_E("Couldn't enforce the RLIMIT_CPU resource limit");
-            return false;
-        }
-    }
-
-    /*
-     * The address space limit. If big enough - roughly the size of RAM used
-     */
-    if (hfuzz->asLimit) {
-        struct rlimit rl;
-
-        rl.rlim_cur = hfuzz->asLimit * 1024UL * 1024UL;
-        rl.rlim_max = hfuzz->asLimit * 1024UL * 1024UL;
-        if (setrlimit(RLIMIT_AS, &rl) == -1) {
-            PLOG_D("Couldn't enforce the RLIMIT_AS resource limit, ignoring");
-        }
-    }
-
-    if (hfuzz->nullifyStdio) {
-        util_nullifyStdio();
-    }
-
-    if (hfuzz->fuzzStdin) {
-        /*
-         * Uglyyyyyy ;)
-         */
-        if (!util_redirectStdin(fileName)) {
-            return false;
-        }
-    }
-
-    for (size_t i = 0; i < ARRAYSIZE(hfuzz->envs) && hfuzz->envs[i]; i++) {
-        putenv(hfuzz->envs[i]);
-    }
-
     execvp(args[0], args);
-
-    util_recoverStdio();
-    LOG_F("Failed to create new '%s' process", args[0]);
     return false;
 }
 
@@ -428,7 +351,10 @@ void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
                 usleep(0.20 * 1000000);
             }
         }
-        LOG_D("Process (pid %d) came back with status %d", fuzzer->pid, status);
+
+        char strStatus[4096];
+        LOG_D("Process (pid %d) came back with status: %s", fuzzer->pid,
+              subproc_StatusToStr(status, strStatus, sizeof(strStatus)));
 
         if (arch_analyzeSignal(hfuzz, status, fuzzer)) {
             return;
@@ -791,4 +717,9 @@ kern_return_t catch_mach_exception_raise_state_identity( __attribute__ ((unused)
     return KERN_SUCCESS;        // KERN_SUCCESS indicates that this should
     // not be forwarded to other crash
     // handlers
+}
+
+bool arch_archThreadInit(honggfuzz_t * hfuzz UNUSED, fuzzer_t * fuzzer UNUSED)
+{
+    return true;
 }
