@@ -137,7 +137,9 @@ fi
 
 if $gatherMode; then
   echo "[*] Processing files from '$INPUT_DIR' ..."
-  find $INPUT_DIR -type f -iname "*.$FILE_EXT" | while read -r FILE
+  find $INPUT_DIR -type f -iname "*.$FILE_EXT" \
+       -o -name "*.$FILE_EXT.verified" \
+       -o -name "*.$FILE_EXT*.min" | while read -r FILE
   do
     fileName=$(basename $FILE)
     if ! echo $fileName | grep -qF ".STACK."; then

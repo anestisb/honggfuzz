@@ -409,6 +409,178 @@ static void fuzz_addFileToFileQLocked(honggfuzz_t * hfuzz, uint8_t * data, size_
     }
 }
 
+static bool fuzz_runSimplifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
+{
+    int origFd = -1, crashFd = -1;
+    uint8_t *origBuf = NULL, *crashBuf = NULL;
+    off_t origFileSz = 0, crashFileSz = 0;
+    size_t diffBytesCnt = 0, revertedBytes = 0, curOff = 0, iterCnt = 0;
+    bool isPartial = false;
+
+    crashBuf = files_mapFile(crashedFuzzer->crashFileName, &crashFileSz, &crashFd, true);
+    if (crashBuf == NULL) {
+        LOG_E("Couldn't open and map '%s' in R/O mode", crashedFuzzer->crashFileName);
+        return false;
+    }
+    defer {
+        munmap(crashBuf, crashFileSz);
+        close(crashFd);
+    };
+
+    char realOrigFile[PATH_MAX] = { 0 };
+
+    if (hfuzz->fileCnt == 1) {
+        /* Single file corpus */
+        snprintf(realOrigFile, sizeof(realOrigFile), "%s", hfuzz->inputFile);
+    } else {
+        /* Directory with seed files */
+        snprintf(realOrigFile, sizeof(realOrigFile), "%s/%s", hfuzz->inputFile,
+                 crashedFuzzer->origFileName);
+    }
+    origBuf = files_mapFile(realOrigFile, &origFileSz, &origFd, false);
+    if (crashBuf == NULL) {
+        LOG_E("Couldn't open and map '%s' in R/O mode", realOrigFile);
+        return false;
+    }
+    defer {
+        munmap(origBuf, origFileSz);
+        close(origFd);
+    };
+
+    /* Calculate iterations counter */
+    if (origFileSz != crashFileSz) {
+#if _HF_ABORT_SIMPLIFIER_ON_SIZ_MISMATCH
+        LOG_E("Simplifier size mismatch abort is enabled");
+        return false;
+#else
+        iterCnt = MIN(crashFileSz, origFileSz);
+#endif
+    } else {
+        iterCnt = crashFileSz;
+    }
+
+    LOG_D("Launching simplifier for %s", crashedFuzzer->crashFileName);
+    for (; curOff < iterCnt; curOff++) {
+        if (origBuf[curOff] == crashBuf[curOff]) {
+            continue;
+        }
+
+        /* Revert change */
+        char oldVal = crashBuf[curOff];
+        crashBuf[curOff] = origBuf[curOff];
+
+        fuzzer_t sFuzzer = {
+            .pid = 0,
+            .persistentPid = 0,
+            .timeStartedMillis = util_timeNowMillis(),
+            .crashFileName = {0},
+            .pc = 0ULL,
+            .backtrace = 0ULL,
+            .access = 0ULL,
+            .exception = 0,
+            .dynamicFileSz = 0,
+            .dynamicFile = NULL,
+            .sanCovCnts = {
+                           .hitBBCnt = 0ULL,
+                           .totalBBCnt = 0ULL,
+                           .dsoCnt = 0ULL,
+                           .iDsoCnt = 0ULL,
+                           .newBBCnt = 0ULL,
+                           .crashesCnt = 0ULL,
+                           },
+            .report = {'\0'},
+            .mainWorker = false,
+
+            .linux = {
+                      .hwCnts = {
+                                 .cpuInstrCnt = 0ULL,
+                                 .cpuBranchCnt = 0ULL,
+                                 .customCnt = 0ULL,
+                                 .bbCnt = 0ULL,
+                                 .newBBCnt = 0ULL,
+                                 },
+                      .perfMmapBuf = NULL,
+                      .perfMmapAux = NULL,
+#if defined(_HF_ARCH_LINUX)
+                      .timerId = (timer_t) 0,
+#endif                          // defined(_HF_ARCH_LINUX)
+                      .attachedPid = 0,
+                      .persistentSock = -1,
+                      },
+        };
+
+        if (arch_archThreadInit(hfuzz, &sFuzzer) == false) {
+            LOG_F("Could not initialize the thread");
+        }
+
+        fuzz_getFileName(hfuzz, sFuzzer.fileName);
+        if (files_writeBufToFile
+            (sFuzzer.fileName, crashBuf, crashFileSz, O_WRONLY | O_CREAT | O_EXCL) == false) {
+            LOG_E("Couldn't write buffer to file '%s'", sFuzzer.fileName);
+            return false;
+        }
+
+        sFuzzer.pid = arch_fork(hfuzz, &sFuzzer);
+        if (sFuzzer.pid == -1) {
+            PLOG_F("Couldn't fork");
+            return false;
+        }
+
+        if (!sFuzzer.pid) {
+            if (fuzz_prepareExecve(hfuzz, crashedFuzzer->crashFileName) == false) {
+                LOG_E("fuzz_prepareExecve() failed");
+                return false;
+            }
+            if (!arch_launchChild(hfuzz, crashedFuzzer->crashFileName)) {
+                LOG_E("Error launching verifier child process");
+                return false;
+            }
+        }
+
+        arch_reapChild(hfuzz, &sFuzzer);
+        unlink(sFuzzer.fileName);
+
+        /* If stack hash doesn't match don't apply revert */
+        if (crashedFuzzer->backtrace != sFuzzer.backtrace) {
+            crashBuf[curOff] = oldVal;
+        } else {
+            revertedBytes++;
+        }
+
+        /* Verify that changes fit into sane ranges */
+        diffBytesCnt++;
+        if (diffBytesCnt > _HF_ABORT_SIMPLIFIER_MAX_DIFF) {
+            LOG_W("Simplifier hit maximum diff tries, saving current changes and aborting");
+            isPartial = true;
+            break;
+        }
+    }
+
+    /* Nothing to write if all tries failed */
+    if (revertedBytes == 0) {
+        LOG_I("Simplifier failed to revert any changes");
+        return false;
+    }
+
+    /* Workspace is inherited, just append a extra suffix */
+    char sFile[PATH_MAX] = { 0 };
+    if (isPartial) {
+        snprintf(sFile, sizeof(sFile), "%s.part.min", crashedFuzzer->crashFileName);
+    } else {
+        snprintf(sFile, sizeof(sFile), "%s.min", crashedFuzzer->crashFileName);
+    }
+
+    if (files_writeBufToFile(sFile, crashBuf, crashFileSz, O_WRONLY | O_CREAT | O_EXCL) == false) {
+        LOG_E("Couldn't write buffer to file '%s'", sFile);
+        return false;
+    }
+
+    LOG_I("'%s' successfully simplified (%zu bytes reverted) - saving as '%s'",
+          crashedFuzzer->crashFileName, revertedBytes, sFile);
+    unlink(crashedFuzzer->crashFileName);
+    return true;
+}
+
 static void fuzz_perfFeedback(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 {
     LOG_D
@@ -612,6 +784,12 @@ static void fuzz_fuzzLoop(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
     if (hfuzz->useVerifier && (fuzzer->crashFileName[0] != 0) && fuzzer->backtrace) {
         if (!fuzz_runVerifier(hfuzz, fuzzer)) {
             LOG_I("Failed to verify %s", fuzzer->crashFileName);
+        }
+    }
+
+    if (hfuzz->useSimplifier && (fuzzer->crashFileName[0] != 0) && fuzzer->backtrace) {
+        if (!fuzz_runSimplifier(hfuzz, fuzzer)) {
+            LOG_I("Failed to simplify %s", fuzzer->crashFileName);
         }
     }
 

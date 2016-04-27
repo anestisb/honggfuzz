@@ -251,6 +251,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         {{"persistent", no_argument, NULL, 'P'}, "Enable persistent fuzzing (link with tools/persistent.mode.main.c)"},
 
 #if defined(_HF_ARCH_LINUX)
+        {{"simplifier", no_argument, NULL, 'S'}, "Enable crashes simplifier"},
         {{"linux_pid", required_argument, NULL, 'p'}, "Attach to a pid (and its thread group)"},
         {{"linux_file_pid", required_argument, NULL, 0x502}, "Attach to pid (and its thread group) read from file"},
         {{"linux_addr_low_limit", required_argument, NULL, 0x500}, "Address limit (from si.si_addr) below which crashes are not reported, (default: '0')"},
@@ -276,7 +277,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
     const char *logfile = NULL;
     int opt_index = 0;
     for (;;) {
-        int c = getopt_long(argc, argv, "-?hqvVsuPf:d:e:W:r:c:F:t:R:n:N:l:p:g:E:w:B:C", opts,
+        int c = getopt_long(argc, argv, "-?hqvVSsuPf:d:e:W:r:c:F:t:R:n:N:l:p:g:E:w:B:C", opts,
                             &opt_index);
         if (c < 0)
             break;
@@ -297,6 +298,9 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
             break;
         case 'V':
             hfuzz->useVerifier = true;
+            break;
+        case 'S':
+            hfuzz->useSimplifier = true;
             break;
         case 's':
             hfuzz->fuzzStdin = true;

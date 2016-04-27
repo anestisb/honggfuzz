@@ -84,6 +84,15 @@ static void __attribute__ ((unused)) __clang_cleanup_func(void (^*dfunc) (void))
 /* Number of crash verifier iterations before tag crash as stable */
 #define _HF_VERIFIER_ITER   5
 
+/*
+ * If enabled simplifier aborts on size mismatch between seed & crash. Otherwise
+ * it tries to revert bytes up to offset of smaller file.
+ */
+#define _HF_ABORT_SIMPLIFIER_ON_SIZ_MISMATCH true
+
+/* Maximum number of diff bytes to try reverting - skipping continus diff blobs */
+#define _HF_ABORT_SIMPLIFIER_MAX_DIFF 30
+
 /* Constant prefix used for single frame crashes stackhash masking */
 #define _HF_SINGLE_FRAME_MASK  0xBADBAD0000000000
 
@@ -233,6 +242,7 @@ typedef struct {
     bool saveUnique;
     bool useScreen;
     bool useVerifier;
+    bool useSimplifier;
     time_t timeStart;
     char *fileExtn;
     char *workDir;
