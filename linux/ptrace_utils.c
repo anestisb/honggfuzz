@@ -54,11 +54,10 @@
 #include "linux/bfd.h"
 #include "linux/unwind.h"
 #include "log.h"
+#include "sancov.h"
 #include "util.h"
 
 #if defined(__ANDROID__)
-#include <linux/ptrace.h>
-#include <asm/ptrace.h>         /* For pt_regs structs */
 #include "capstone.h"
 #endif
 
@@ -224,12 +223,6 @@ struct user_regs_struct_64 {
 };
 #endif                          /* defined(__powerpc64__) || defined(__powerpc__) */
 
-#ifdef __ANDROID__
-#ifndef WIFCONTINUED
-#define WIFCONTINUED(x) WEXITSTATUS(0)
-#endif
-#endif
-
 #if defined(__ANDROID__)
 #if defined(__NR_process_vm_readv)
 static ssize_t honggfuzz_process_vm_readv(pid_t pid,
@@ -246,83 +239,6 @@ static ssize_t honggfuzz_process_vm_readv(pid_t pid,
 #else                           /* defined(__NR_process_vm_readv) */
 #define process_vm_readv(...) (errno = ENOSYS, -1)
 #endif                          /* !defined(__NR_process_vm_readv) */
-
-// Naming compatibilities
-#if !defined(PT_TRACE_ME)
-#define PT_TRACE_ME PTRACE_TRACEME
-#endif
-
-#if !defined(PT_READ_I)
-#define PT_READ_I PTRACE_PEEKTEXT
-#endif
-
-#if !defined(PT_READ_D)
-#define PT_READ_D PTRACE_PEEKDATA
-#endif
-
-#if !defined(PT_READ_U)
-#define PT_READ_U PTRACE_PEEKUSR
-#endif
-
-#if !defined(PT_WRITE_I)
-#define PT_WRITE_I PTRACE_POKETEXT
-#endif
-
-#if !defined(PT_WRITE_D)
-#define PT_WRITE_D PTRACE_POKEDATA
-#endif
-
-#if !defined(PT_WRITE_U)
-#define PT_WRITE_U PTRACE_POKEUSR
-#endif
-
-#if !defined(PT_CONT)
-#define PT_CONT PTRACE_CONT
-#endif
-
-#if !defined(PT_CONTINUE)
-#define PT_CONTINUE PTRACE_CONT
-#endif
-
-#if !defined(PT_KILL)
-#define PT_KILL PTRACE_KILL
-#endif
-
-#if !defined(PT_STEP)
-#define PT_STEP PTRACE_SINGLESTEP
-#endif
-
-#if !defined(PT_GETFPREGS)
-#define PT_GETFPREGS PTRACE_GETFPREGS
-#endif
-
-#if !defined(PT_ATTACH)
-#define PT_ATTACH PTRACE_ATTACH
-#endif
-
-#if !defined(PT_DETACH)
-#define PT_DETACH PTRACE_DETACH
-#endif
-
-#if !defined(PT_SYSCALL)
-#define PT_SYSCALL PTRACE_SYSCALL
-#endif
-
-#if !defined(PT_SETOPTIONS)
-#define PT_SETOPTIONS PTRACE_SETOPTIONS
-#endif
-
-#if !defined(PT_GETEVENTMSG)
-#define PT_GETEVENTMSG PTRACE_GETEVENTMSG
-#endif
-
-#if !defined(PT_GETSIGINFO)
-#define PT_GETSIGINFO PTRACE_GETSIGINFO
-#endif
-
-#if !defined(PT_SETSIGINFO)
-#define PT_SETSIGINFO PTRACE_SETSIGINFO
-#endif
 
 /*
  * Some Android ABIs don't implement PTRACE_GETREGS (e.g. aarch64)
@@ -416,7 +332,7 @@ static size_t arch_getProcMem(pid_t pid, uint8_t * buf, size_t len, REG_TYPE pc)
 
     for (int x = 0; x < cnt; x++) {
         uint8_t *addr = (uint8_t *) (uintptr_t) pc + (int)(x * sizeof(long));
-        long ret = ptrace(PT_READ_D, pid, addr, NULL);
+        long ret = ptrace(PTRACE_PEEKDATA, pid, addr, NULL);
 
         if (errno != 0) {
             PLOG_W("Couldn't PT_READ_D on pid %d, addr: %p", pid, addr);
@@ -729,7 +645,7 @@ static void arch_hashCallstack(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, funcs_t *
                                size_t funcCnt, bool enableMasking)
 {
     uint64_t hash = 0;
-    for (size_t i = 0; i < funcCnt && i < hfuzz->numMajorFrames; i++) {
+    for (size_t i = 0; i < funcCnt && i < hfuzz->linux.numMajorFrames; i++) {
         /*
          * Convert PC to char array to be compatible with hash function
          */
@@ -877,7 +793,7 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
     siginfo_t si;
     bzero(&si, sizeof(si));
 
-    if (ptrace(PT_GETSIGINFO, pid, 0, &si) == -1) {
+    if (ptrace(PTRACE_GETSIGINFO, pid, 0, &si) == -1) {
         PLOG_W("Couldn't get siginfo for pid %d", pid);
     }
 
@@ -886,9 +802,9 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
     LOG_D("Pid: %d, signo: %d, errno: %d, code: %d, addr: %p, pc: %"
           REG_PM ", instr: '%s'", pid, si.si_signo, si.si_errno, si.si_code, si.si_addr, pc, instr);
 
-    if (!SI_FROMUSER(&si) && pc && si.si_addr < hfuzz->ignoreAddr) {
+    if (!SI_FROMUSER(&si) && pc && si.si_addr < hfuzz->linux.ignoreAddr) {
         LOG_I("'%s' is interesting (%s), but the si.si_addr is %p (below %p), skipping",
-              fuzzer->fileName, arch_sigs[si.si_signo].descr, si.si_addr, hfuzz->ignoreAddr);
+              fuzzer->fileName, arch_sigs[si.si_signo].descr, si.si_addr, hfuzz->linux.ignoreAddr);
         return;
     }
 
@@ -989,7 +905,7 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
     }
 
     /* Increase global crashes counter */
-    __sync_fetch_and_add(&hfuzz->crashesCnt, 1UL);
+    ATOMIC_POST_INC(hfuzz->crashesCnt);
 
     /*
      * Check if stackhash is blacklisted
@@ -997,15 +913,15 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
     if (hfuzz->blacklist
         && (fastArray64Search(hfuzz->blacklist, hfuzz->blacklistCnt, fuzzer->backtrace) != -1)) {
         LOG_I("Blacklisted stack hash '%" PRIx64 "', skipping", fuzzer->backtrace);
-        __sync_fetch_and_add(&hfuzz->blCrashesCnt, 1UL);
+        ATOMIC_POST_INC(hfuzz->blCrashesCnt);
         return;
     }
 
     /* If non-blacklisted crash detected, zero set two MSB */
-    __sync_fetch_and_and(&hfuzz->dynFileIterExpire, _HF_DYNFILE_SUB_MASK);
+    ATOMIC_POST_ADD(hfuzz->dynFileIterExpire, _HF_DYNFILE_SUB_MASK);
 
     void *sig_addr = si.si_addr;
-    if (hfuzz->disableRandomization == false) {
+    if (hfuzz->linux.disableRandomization == false) {
         pc = 0UL;
         sig_addr = NULL;
     }
@@ -1016,7 +932,7 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
     }
 
     /* If dry run mode, copy file with same name into workspace */
-    if (hfuzz->flipRate == 0.0L && hfuzz->useVerifier) {
+    if (hfuzz->origFlipRate == 0.0L && hfuzz->useVerifier) {
         snprintf(fuzzer->crashFileName, sizeof(fuzzer->crashFileName), "%s/%s",
                  hfuzz->workDir, fuzzer->origFileName);
     } else if (saveUnique) {
@@ -1033,27 +949,25 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
                  si.si_code, sig_addr, instr, localtmstr, pid, hfuzz->fileExtn);
     }
 
-    bool dstFileExists = false;
-    if (files_copyFile(fuzzer->fileName, fuzzer->crashFileName, &dstFileExists)) {
-        LOG_I("Ok, that's interesting, saved '%s' as '%s'", fuzzer->fileName,
-              fuzzer->crashFileName);
-        __sync_fetch_and_add(&hfuzz->uniqueCrashesCnt, 1UL);
-
-        /* If unique crash found, reset dynFile counter */
-        __sync_fetch_and_and(&hfuzz->dynFileIterExpire, 0UL);
-    } else {
-        if (dstFileExists) {
-            LOG_I("It seems that '%s' already exists, skipping", fuzzer->crashFileName);
-
-            // Clear filename so that verifier can understand we hit a duplicate
-            memset(fuzzer->crashFileName, 0, sizeof(fuzzer->crashFileName));
-        } else {
-            LOG_E("Couldn't copy '%s' to '%s'", fuzzer->fileName, fuzzer->crashFileName);
-        }
-
-        /* Don't bother generating reports for duplicate or non-saved crashes */
+    if (files_exists(fuzzer->crashFileName)) {
+        LOG_I("It seems that '%s' already exists, skipping", fuzzer->crashFileName);
+        // Clear filename so that verifier can understand we hit a duplicate
+        memset(fuzzer->crashFileName, 0, sizeof(fuzzer->crashFileName));
         return;
     }
+
+    if (files_writeBufToFile
+        (fuzzer->crashFileName, fuzzer->dynamicFile, fuzzer->dynamicFileSz,
+         O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC) == false) {
+        LOG_E("Couldn't copy '%s' to '%s'", fuzzer->fileName, fuzzer->crashFileName);
+        return;
+    }
+
+    LOG_I("Ok, that's interesting, saved '%s' as '%s'", fuzzer->fileName, fuzzer->crashFileName);
+
+    ATOMIC_POST_INC(hfuzz->uniqueCrashesCnt);
+    /* If unique crash found, reset dynFile counter */
+    ATOMIC_CLEAR(hfuzz->dynFileIterExpire);
 
     arch_ptraceGenerateReport(pid, fuzzer, funcs, funcCnt, &si, instr);
 }
@@ -1062,6 +976,7 @@ static int arch_parseAsanReport(honggfuzz_t * hfuzz, pid_t pid, funcs_t * funcs,
                                 char **op)
 {
     char crashReport[PATH_MAX] = { 0 };
+    const char *const crashReportCpy = crashReport;
     snprintf(crashReport, sizeof(crashReport), "%s/%s.%d", hfuzz->workDir, kLOGPREFIX, pid);
 
     FILE *fReport = fopen(crashReport, "rb");
@@ -1069,6 +984,12 @@ static int arch_parseAsanReport(honggfuzz_t * hfuzz, pid_t pid, funcs_t * funcs,
         PLOG_D("Couldn't open '%s' - R/O mode", crashReport);
         return -1;
     }
+    defer {
+        fclose(fReport);
+    };
+    defer {
+        unlink(crashReportCpy);
+    };
 
     char header[35] = { 0 };
     snprintf(header, sizeof(header), "==%d==ERROR: AddressSanitizer:", pid);
@@ -1085,6 +1006,9 @@ static int arch_parseAsanReport(honggfuzz_t * hfuzz, pid_t pid, funcs_t * funcs,
         if (getline(&lineptr, &n, fReport) == -1) {
             break;
         }
+        defer {
+            free(lineptr);
+        };
 
         /* First step is to identify header */
         if (headerFound == false) {
@@ -1167,9 +1091,6 @@ static int arch_parseAsanReport(honggfuzz_t * hfuzz, pid_t pid, funcs_t * funcs,
         }
     }
 
-    fclose(fReport);
-    free(lineptr);
-    unlink(crashReport);
     return frameIdx;
 }
 
@@ -1183,7 +1104,7 @@ static void arch_ptraceExitSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * f
     REG_TYPE pc = 0;
     void *crashAddr = 0;
     char *op = "UNKNOWN";
-    pid_t targetPid = (hfuzz->pid > 0) ? hfuzz->pid : fuzzer->pid;
+    pid_t targetPid = (hfuzz->linux.pid > 0) ? hfuzz->linux.pid : fuzzer->pid;
 
     /* Save only the first hit for each worker */
     if (fuzzer->crashFileName[0] != '\0') {
@@ -1191,8 +1112,8 @@ static void arch_ptraceExitSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * f
     }
 
     /* Increase global crashes counter */
-    __sync_fetch_and_add(&hfuzz->crashesCnt, 1UL);
-    __sync_fetch_and_and(&hfuzz->dynFileIterExpire, _HF_DYNFILE_SUB_MASK);
+    ATOMIC_POST_INC(hfuzz->crashesCnt);
+    ATOMIC_POST_AND(hfuzz->dynFileIterExpire, _HF_DYNFILE_SUB_MASK);
 
     /*
      * If fuzzing with sanitizer coverage feedback increase crashes counter used
@@ -1237,9 +1158,9 @@ static void arch_ptraceExitSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * f
         }
 
         /* Since crash address is available, apply ignoreAddr filters */
-        if (crashAddr < hfuzz->ignoreAddr) {
+        if (crashAddr < hfuzz->linux.ignoreAddr) {
             LOG_I("'%s' is interesting, but the crash addr is %p (below %p), skipping",
-                  fuzzer->fileName, crashAddr, hfuzz->ignoreAddr);
+                  fuzzer->fileName, crashAddr, hfuzz->linux.ignoreAddr);
             return;
         }
 
@@ -1252,13 +1173,13 @@ static void arch_ptraceExitSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * f
             && (fastArray64Search(hfuzz->blacklist, hfuzz->blacklistCnt, fuzzer->backtrace) !=
                 -1)) {
             LOG_I("Blacklisted stack hash '%" PRIx64 "', skipping", fuzzer->backtrace);
-            __sync_fetch_and_add(&hfuzz->blCrashesCnt, 1UL);
+            ATOMIC_POST_INC(hfuzz->blCrashesCnt);
             return;
         }
     }
 
     /* If dry run mode, copy file with same name into workspace */
-    if (hfuzz->flipRate == 0.0L && hfuzz->useVerifier) {
+    if (hfuzz->origFlipRate == 0.0L && hfuzz->useVerifier) {
         snprintf(fuzzer->crashFileName, sizeof(fuzzer->crashFileName), "%s/%s",
                  hfuzz->workDir, fuzzer->origFileName);
     } else {
@@ -1285,8 +1206,8 @@ static void arch_ptraceExitSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * f
               fuzzer->crashFileName);
 
         /* Increase unique crashes counters */
-        __sync_fetch_and_add(&hfuzz->uniqueCrashesCnt, 1UL);
-        __sync_fetch_and_and(&hfuzz->dynFileIterExpire, 0UL);
+        ATOMIC_POST_INC(hfuzz->uniqueCrashesCnt);
+        ATOMIC_CLEAR(hfuzz->dynFileIterExpire);
     } else {
         if (dstFileExists) {
             LOG_I("It seems that '%s' already exists, skipping", fuzzer->crashFileName);
@@ -1413,7 +1334,7 @@ static void arch_ptraceEvent(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, int status,
         break;
     }
 
-    ptrace(PT_CONTINUE, pid, 0, 0);
+    ptrace(PTRACE_CONT, pid, 0, 0);
 }
 
 void arch_ptraceAnalyze(honggfuzz_t * hfuzz, int status, pid_t pid, fuzzer_t * fuzzer)
@@ -1440,7 +1361,7 @@ void arch_ptraceAnalyze(honggfuzz_t * hfuzz, int status, pid_t pid, fuzzer_t * f
                 arch_ptraceAnalyzeData(hfuzz, pid, fuzzer);
             }
         }
-        ptrace(PT_CONTINUE, pid, 0, WSTOPSIG(status));
+        ptrace(PTRACE_CONT, pid, 0, WSTOPSIG(status));
         return;
     }
 
@@ -1494,12 +1415,14 @@ static bool arch_listThreads(int tasks[], size_t thrSz, int pid)
         PLOG_E("Couldn't open dir '%s'", path);
         return false;
     }
+    defer {
+        closedir(dir);
+    };
 
     for (;;) {
         struct dirent de, *res;
         if (readdir_r(dir, &de, &res) > 0) {
             PLOG_E("Couldn't read contents of '%s'", path);
-            closedir(dir);
             return false;
         }
 
@@ -1520,7 +1443,6 @@ static bool arch_listThreads(int tasks[], size_t thrSz, int pid)
             break;
         }
     }
-    closedir(dir);
     PLOG_D("Total number of threads in pid '%d': '%zd'", pid, count);
     tasks[count + 1] = 0;
     if (count < 1) {

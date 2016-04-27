@@ -29,7 +29,6 @@
 #include <linux/perf_event.h>
 #include <stdint.h>
 
-extern void arch_ptAnalyze(struct perf_event_mmap_page *pem, uint8_t * auxBuf,
-                           void (*add_branch) (uint64_t from, uint64_t to));
+extern void arch_ptAnalyze(honggfuzz_t * hfuzz, fuzzer_t * fuzzer);
 
 #endif                          /* _HF_LINUX_INTEL_PT_LIB */

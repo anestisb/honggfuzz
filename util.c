@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -40,17 +41,39 @@
 #include "files.h"
 #include "log.h"
 
-#if defined(__builtin_bswap16)
-#define SWAP16(x)   __builtin_bswap16(x)
-#else
-#define SWAP16(x)   ((x & 0xff) << 8) | ((x & 0xff00) >> 8)
-#endif
+void *util_Malloc(size_t sz)
+{
+    void *p = malloc(sz);
+    if (p == NULL) {
+        LOG_F("malloc(size='%zu')", sz);
+    }
+    return p;
+}
 
-#if defined(__builtin_bswap32)
-#define SWAP32(x)   __builtin_bswap32(x)
-#else
-#define SWAP32(x)   ((x & 0xff) << 24) | ((x & 0xff00) << 8) | ((x & 0xff0000) >> 8) | ((x & 0xff000000) >> 24)
-#endif
+void *util_Calloc(size_t sz)
+{
+    void *p = util_Malloc(sz);
+    memset(p, '\0', sz);
+    return p;
+}
+
+void *util_MMap(size_t sz)
+{
+    void *p = mmap(NULL, sz, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE | MAP_NORESERVE, -1, 0);
+    if (p == MAP_FAILED) {
+        LOG_F("mmap(size='%zu')", sz);
+    }
+    return p;
+}
+
+char *util_StrDup(const char *s)
+{
+    char *ret = strdup(s);
+    if (ret == NULL) {
+        LOG_F("strdup(size=%zu)", strlen(s));
+    }
+    return ret;
+}
 
 static int util_urandomFd = -1;
 static __thread uint64_t rndX;
@@ -63,7 +86,7 @@ uint64_t util_rndGet(uint64_t min, uint64_t max)
     }
 
     if (util_urandomFd == -1) {
-        if ((util_urandomFd = open("/dev/urandom", O_RDONLY)) == -1) {
+        if ((util_urandomFd = open("/dev/urandom", O_RDONLY | O_CLOEXEC)) == -1) {
             PLOG_F("Couldn't open /dev/urandom for writing");
         }
     }
@@ -93,7 +116,7 @@ void util_rndBuf(uint8_t * buf, size_t sz)
 
     for (size_t i = 0; i < sz; i++) {
         x = (a * x + c);
-        buf[i] = (uint8_t) (x & 0xFF);
+        buf[i] = (uint8_t) ((x & 0xFF0000) > 16);
     }
 }
 
@@ -159,7 +182,7 @@ void util_nullifyStdio(void)
     }
 }
 
-bool util_redirectStdin(char *inputFile)
+bool util_redirectStdin(const char *inputFile)
 {
     int fd = open(inputFile, O_RDONLY);
 
@@ -174,28 +197,6 @@ bool util_redirectStdin(char *inputFile)
     }
 
     return true;
-}
-
-void util_recoverStdio(void)
-{
-    int fd = open("/dev/tty", O_RDWR);
-
-    if (fd == -1) {
-        PLOG_E("Couldn't open '/dev/tty'");
-        return;
-    }
-
-    dup2(fd, 0);
-    dup2(fd, 1);
-    dup2(fd, 2);
-
-    if (tcsetpgrp(fd, getpid()) == -1) {
-        PLOG_W("tcsetpgrp(%d) failed", getpid());
-    }
-
-    if (fd > 2) {
-        close(fd);
-    }
 }
 
 /*
@@ -224,94 +225,31 @@ int64_t util_timeNowMillis(void)
     return (((int64_t) tv.tv_sec * 1000LL) + ((int64_t) tv.tv_usec / 1000LL));
 }
 
-uint16_t util_ToFromBE16(uint16_t val)
-{
-#if __BYTE_ORDER == __BIG_ENDIAN
-    return val;
-#elif __BYTE_ORDER == __LITTLE_ENDIAN
-    return SWAP16(val);
-#else
-#error "Unknown ENDIANNESS"
-#endif
-}
-
-uint16_t util_ToFromLE16(uint16_t val)
-{
-#if __BYTE_ORDER == __BIG_ENDIAN
-    return SWAP16(val);
-#elif __BYTE_ORDER == __LITTLE_ENDIAN
-    return val;
-#else
-#error "Unknown ENDIANNESS"
-#endif
-}
-
-uint32_t util_ToFromBE32(uint32_t val)
-{
-#if __BYTE_ORDER == __BIG_ENDIAN
-    return val;
-#elif __BYTE_ORDER == __LITTLE_ENDIAN
-    return SWAP32(val);
-#else
-#error "Unknown ENDIANNESS"
-#endif
-}
-
-uint32_t util_ToFromLE32(uint32_t val)
-{
-#if __BYTE_ORDER == __BIG_ENDIAN
-    return SWAP32(val);
-#elif __BYTE_ORDER == __LITTLE_ENDIAN
-    return val;
-#else
-#error "Unknown ENDIANNESS"
-#endif
-}
-
 uint64_t util_getUINT32(const uint8_t * buf)
 {
-    const uint8_t b0 = buf[0], b1 = buf[1], b2 = buf[2], b3 = buf[3];
-
-#if __BYTE_ORDER == __BIG_ENDIAN
-    return (uint64_t) ((uint32_t) b0 << 24) | ((uint32_t) b1 << 16) | ((uint32_t) b2 << 8) |
-        (uint32_t) b3;
-#elif __BYTE_ORDER == __LITTLE_ENDIAN
-    return (uint64_t) ((uint32_t) b3 << 24) | ((uint32_t) b2 << 16) | ((uint32_t) b1 << 8) |
-        (uint32_t) b0;
-#else
-#error "Unknown ENDIANNESS"
-#endif
+    uint32_t r;
+    memcpy(&r, buf, sizeof(r));
+    return (uint64_t) r;
 }
 
 uint64_t util_getUINT64(const uint8_t * buf)
 {
-    const uint8_t b0 = buf[0], b1 = buf[1], b2 = buf[2], b3 = buf[3],
-        b4 = buf[4], b5 = buf[5], b6 = buf[6], b7 = buf[7];
-
-#if __BYTE_ORDER == __BIG_ENDIAN
-    return ((uint64_t) b0 << 56) | ((uint64_t) b1 << 48) | ((uint64_t) b2 << 40) |
-        ((uint64_t) b3 << 32) | ((uint64_t) b4 << 24) | ((uint64_t) b5 << 16) |
-        ((uint64_t) b6 << 8) | (uint64_t) b7;
-#elif __BYTE_ORDER == __LITTLE_ENDIAN
-    return ((uint64_t) b7 << 56) | ((uint64_t) b6 << 48) | ((uint64_t) b5 << 40) |
-        ((uint64_t) b4 << 32) | ((uint64_t) b3 << 24) | ((uint64_t) b2 << 16) |
-        ((uint64_t) b1 << 8) | (uint64_t) b0;
-#else
-#error "Unknown ENDIANNESS"
-#endif
+    uint64_t r;
+    memcpy(&r, buf, sizeof(r));
+    return r;
 }
 
-void MX_LOCK(pthread_mutex_t * mutex)
+void util_mutexLock(pthread_mutex_t * mutex, const char *func, int line)
 {
     if (pthread_mutex_lock(mutex)) {
-        PLOG_F("pthread_mutex_lock(%p)", mutex);
+        PLOG_F("%s():%d pthread_mutex_lock(%p)", func, line, (void *)mutex);
     }
 }
 
-void MX_UNLOCK(pthread_mutex_t * mutex)
+void util_mutexUnlock(pthread_mutex_t * mutex, const char *func, int line)
 {
     if (pthread_mutex_unlock(mutex)) {
-        PLOG_F("pthread_mutex_unlock(%p)", mutex);
+        PLOG_F("%s():%d pthread_mutex_unlock(%p)", func, line, (void *)mutex);
     }
 }
 
