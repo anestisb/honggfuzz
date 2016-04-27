@@ -26,27 +26,25 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/cdefs.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
-#include "log.h"
-#include "util.h"
 #include "files.h"
-
-#ifdef __ANDROID__
-#ifndef WIFCONTINUED
-#define WIFCONTINUED(x) WEXITSTATUS(0)
-#endif
-#endif
+#include "log.h"
+#include "sancov.h"
+#include "subproc.h"
+#include "util.h"
 
 /*  *INDENT-OFF* */
 struct {
@@ -82,6 +80,10 @@ static bool arch_analyzeSignal(honggfuzz_t * hfuzz, int status, fuzzer_t * fuzze
         return false;
     }
 
+    if (WIFEXITED(status) || WIFSIGNALED(status)) {
+        sancov_Analyze(hfuzz, fuzzer);
+    }
+
     /*
      * Boring, the process just exited
      */
@@ -112,7 +114,7 @@ static bool arch_analyzeSignal(honggfuzz_t * hfuzz, int status, fuzzer_t * fuzze
     char newname[PATH_MAX];
 
     /* If dry run mode, copy file with same name into workspace */
-    if (hfuzz->flipRate == 0.0L && hfuzz->useVerifier) {
+    if (hfuzz->origFlipRate == 0.0L && hfuzz->useVerifier) {
         snprintf(newname, sizeof(newname), "%s", fuzzer->origFileName);
     } else {
         snprintf(newname, sizeof(newname), "%s/%s.%d.%s.%s.%s",
@@ -125,16 +127,19 @@ static bool arch_analyzeSignal(honggfuzz_t * hfuzz, int status, fuzzer_t * fuzze
     /*
      * All crashes are marked as unique due to lack of information in POSIX arch
      */
-    __sync_fetch_and_add(&hfuzz->crashesCnt, 1UL);
-    __sync_fetch_and_add(&hfuzz->uniqueCrashesCnt, 1UL);
+    ATOMIC_POST_INC(hfuzz->crashesCnt);
+    ATOMIC_POST_INC(hfuzz->uniqueCrashesCnt);
 
-    if (files_copyFile(fuzzer->fileName, newname, NULL) == false) {
-        LOG_E("Couldn't save '%s' as '%s'", fuzzer->fileName, newname);
+    if (files_writeBufToFile
+        (fuzzer->crashFileName, fuzzer->dynamicFile, fuzzer->dynamicFileSz,
+         O_CREAT | O_EXCL | O_WRONLY) == false) {
+        LOG_E("Couldn't copy '%s' to '%s'", fuzzer->fileName, fuzzer->crashFileName);
     }
+
     return true;
 }
 
-pid_t arch_fork(honggfuzz_t * hfuzz UNUSED)
+pid_t arch_fork(honggfuzz_t * hfuzz UNUSED, fuzzer_t * fuzzer UNUSED)
 {
     return fork();
 }
@@ -163,85 +168,7 @@ bool arch_launchChild(honggfuzz_t * hfuzz, char *fileName)
 
     LOG_D("Launching '%s' on file '%s'", args[0], fileName);
 
-    /*
-     * Set timeout (prof), real timeout (2*prof), and rlimit_cpu (2*prof)
-     */
-    if (hfuzz->tmOut) {
-        struct itimerval it;
-
-        /*
-         * The hfuzz->tmOut is real CPU usage time...
-         */
-        it.it_value.tv_sec = hfuzz->tmOut;
-        it.it_value.tv_usec = 0;
-        it.it_interval.tv_sec = 0;
-        it.it_interval.tv_usec = 0;
-        if (setitimer(ITIMER_PROF, &it, NULL) == -1) {
-            PLOG_E("Couldn't set the ITIMER_PROF timer");
-            return false;
-        }
-
-        /*
-         * ...so, if a process sleeps, this one should
-         * trigger a signal...
-         */
-        it.it_value.tv_sec = hfuzz->tmOut * 2UL;
-        it.it_value.tv_usec = 0;
-        it.it_interval.tv_sec = 0;
-        it.it_interval.tv_usec = 0;
-        if (setitimer(ITIMER_REAL, &it, NULL) == -1) {
-            PLOG_E("Couldn't set the ITIMER_REAL timer");
-            return false;
-        }
-
-        /*
-         * ..if a process sleeps and catches SIGPROF/SIGALRM
-         * rlimits won't help either
-         */
-        struct rlimit rl;
-
-        rl.rlim_cur = hfuzz->tmOut * 2;
-        rl.rlim_max = hfuzz->tmOut * 2;
-        if (setrlimit(RLIMIT_CPU, &rl) == -1) {
-            PLOG_E("Couldn't enforce the RLIMIT_CPU resource limit");
-            return false;
-        }
-    }
-
-    /*
-     * The address space limit. If big enough - roughly the size of RAM used
-     */
-    if (hfuzz->asLimit) {
-        struct rlimit rl;
-
-        rl.rlim_cur = hfuzz->asLimit * 1024UL * 1024UL;
-        rl.rlim_max = hfuzz->asLimit * 1024UL * 1024UL;
-        if (setrlimit(RLIMIT_AS, &rl) == -1) {
-            PLOG_D("Couldn't enforce the RLIMIT_AS resource limit, ignoring");
-        }
-    }
-
-    if (hfuzz->nullifyStdio) {
-        util_nullifyStdio();
-    }
-
-    if (hfuzz->fuzzStdin) {
-        /*
-         * Uglyyyyyy ;)
-         */
-        if (!util_redirectStdin(fileName)) {
-            return false;
-        }
-    }
-
-    for (size_t i = 0; i < ARRAYSIZE(hfuzz->envs) && hfuzz->envs[i]; i++) {
-        putenv(hfuzz->envs[i]);
-    }
-
     execvp(args[0], args);
-
-    util_recoverStdio();
-    LOG_F("Failed to create new '%s' process", args[0]);
     return false;
 }
 
@@ -254,7 +181,10 @@ void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 #define __WALL 0
 #endif
         while (wait4(fuzzer->pid, &status, __WALL, NULL) != fuzzer->pid) ;
-        LOG_D("Process (pid %d) came back with status %d", fuzzer->pid, status);
+
+        char strStatus[4096];
+        LOG_D("Process (pid %d) came back with status: %s", fuzzer->pid,
+              subproc_StatusToStr(status, strStatus, sizeof(strStatus)));
 
         if (arch_analyzeSignal(hfuzz, status, fuzzer)) {
             return;
@@ -263,6 +193,11 @@ void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 }
 
 bool arch_archInit(honggfuzz_t * hfuzz UNUSED)
+{
+    return true;
+}
+
+bool arch_archThreadInit(honggfuzz_t * hfuzz UNUSED, fuzzer_t * fuzzer UNUSED)
 {
     return true;
 }

@@ -25,6 +25,7 @@
 
 #include <inttypes.h>
 #include <getopt.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,15 +34,100 @@
 
 #include "common.h"
 #include "cmdline.h"
+#include "display.h"
 #include "log.h"
 #include "files.h"
 #include "fuzz.h"
 #include "util.h"
 
+static int sigReceived = 0;
+
+/*
+ * CygWin/MinGW incorrectly copies stack during fork(), so we need to keep some
+ * structures in the data section
+ */
+honggfuzz_t hfuzz;
+
+void sigHandler(int sig)
+{
+    /* We should not terminate upon SIGALRM delivery */
+    if (sig == SIGALRM) {
+        return;
+    }
+
+    sigReceived = sig;
+}
+
+static void setupTimer(void)
+{
+    struct itimerval it = {
+        .it_value = {.tv_sec = 1,.tv_usec = 0},
+        .it_interval = {.tv_sec = 1,.tv_usec = 0},
+    };
+    if (setitimer(ITIMER_REAL, &it, NULL) == -1) {
+        PLOG_F("setitimer(ITIMER_REAL)");
+    }
+}
+
+static void setupSignalsPreThr(void)
+{
+    /* Block signals which should be handled by the main thread */
+    sigset_t ss;
+    sigemptyset(&ss);
+    sigaddset(&ss, SIGTERM);
+    sigaddset(&ss, SIGINT);
+    sigaddset(&ss, SIGQUIT);
+    sigaddset(&ss, SIGALRM);
+    if (sigprocmask(SIG_BLOCK, &ss, NULL) != 0) {
+        PLOG_F("pthread_sigmask(SIG_BLOCK)");
+    }
+}
+
+static void setupSignalsPostThr(void)
+{
+    struct sigaction sa = {
+        .sa_handler = sigHandler,
+        .sa_flags = 0,
+    };
+    sigemptyset(&sa.sa_mask);
+    if (sigaction(SIGTERM, &sa, NULL) == -1) {
+        PLOG_F("sigaction(SIGTERM) failed");
+    }
+    if (sigaction(SIGINT, &sa, NULL) == -1) {
+        PLOG_F("sigaction(SIGINT) failed");
+    }
+    if (sigaction(SIGQUIT, &sa, NULL) == -1) {
+        PLOG_F("sigaction(SIGQUIT) failed");
+    }
+    if (sigaction(SIGALRM, &sa, NULL) == -1) {
+        PLOG_F("sigaction(SIGQUIT) failed");
+    }
+    /* Unblock signals which should be handled by the main thread */
+    sigset_t ss;
+    sigemptyset(&ss);
+    sigaddset(&ss, SIGTERM);
+    sigaddset(&ss, SIGINT);
+    sigaddset(&ss, SIGQUIT);
+    sigaddset(&ss, SIGALRM);
+    if (sigprocmask(SIG_UNBLOCK, &ss, NULL) != 0) {
+        PLOG_F("pthread_sigmask(SIG_UNBLOCK)");
+    }
+}
+
 int main(int argc, char **argv)
 {
-    honggfuzz_t hfuzz;
-    if (cmdlineParse(argc, argv, &hfuzz) == false) {
+    /*
+     * Work around CygWin/MinGW
+     */
+    char **myargs = (char **)util_Malloc(sizeof(char *) * (argc + 1));
+
+    int i;
+    for (i = 0U; i < argc; i++) {
+        myargs[i] = argv[i];
+    }
+    myargs[i] = NULL;
+
+    if (cmdlineParse(argc, myargs, &hfuzz) == false) {
         LOG_F("Parsing of the cmd-line arguments failed");
     }
 
@@ -61,8 +147,51 @@ int main(int argc, char **argv)
     /*
      * So far so good
      */
-    fuzz_main(&hfuzz);
+    setupSignalsPreThr();
+    fuzz_threads(&hfuzz);
+    setupSignalsPostThr();
 
-    abort();                    /* NOTREACHED */
+    setupTimer();
+    for (;;) {
+        if (hfuzz.useScreen) {
+            display_display(&hfuzz);
+        }
+        if (sigReceived > 0) {
+            break;
+        }
+        if (ATOMIC_GET(hfuzz.threadsFinished) >= hfuzz.threadsMax) {
+            break;
+        }
+        pause();
+    }
+
+    if (sigReceived > 0) {
+        LOG_I("Signal %d (%s) received, terminating", sigReceived, strsignal(sigReceived));
+    }
+
+    /* Clean-up global buffers */
+    free(hfuzz.files);
+    if (hfuzz.dictionary) {
+        for (size_t i = 0; i < hfuzz.dictionaryCnt; i++) {
+            free(hfuzz.dictionary[i]);
+        }
+        free(hfuzz.dictionary);
+    }
+    if (hfuzz.blacklist) {
+        free(hfuzz.blacklist);
+    }
+    if (hfuzz.sanOpts.asanOpts) {
+        free(hfuzz.sanOpts.asanOpts);
+    }
+    if (hfuzz.sanOpts.ubsanOpts) {
+        free(hfuzz.sanOpts.ubsanOpts);
+    }
+    if (hfuzz.sanOpts.msanOpts) {
+        free(hfuzz.sanOpts.msanOpts);
+    }
+    if (hfuzz.linux.pidCmd) {
+        free(hfuzz.linux.pidCmd);
+    }
+
     return EXIT_SUCCESS;
 }

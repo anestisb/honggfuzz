@@ -19,28 +19,26 @@
 
 
 # Common for all architectures
+CC ?= gcc
+LD = $(CC)
 BIN := honggfuzz
-COMMON_CFLAGS := -D_GNU_SOURCE -Wall -Werror -Wframe-larger-than=51200
+COMMON_CFLAGS := -D_GNU_SOURCE -Wall -Werror -Wframe-larger-than=131072
 COMMON_LDFLAGS := -lm
-COMMON_SRCS := honggfuzz.c cmdline.c display.c log.c files.c fuzz.c report.c mangle.c util.c
+COMMON_SRCS := honggfuzz.c cmdline.c display.c files.c fuzz.c log.c mangle.c report.c sancov.c subproc.c util.c
 
 OS ?= $(shell uname -s)
 MARCH ?= $(shell uname -m)
 
 ifeq ($(OS),Linux)
     ARCH := LINUX
-    ARCH_DSUFFIX := .so
 
-    CC ?= gcc
-    LD = $(CC)
     ARCH_CFLAGS := -std=c11 -I. -I/usr/local/include -I/usr/include \
                    -Wextra -Wno-initializer-overrides -Wno-override-init \
-                   -Wno-unknown-warning-option -funroll-loops -O2 \
+                   -Wno-unknown-warning-option -funroll-loops -O3 \
                    -D_FILE_OFFSET_BITS=64
     ARCH_LDFLAGS := -L/usr/local/include -L/usr/include \
                     -lpthread -lunwind-ptrace -lunwind-generic -lbfd -lopcodes -lrt
     ARCH_SRCS := $(wildcard linux/*.c)
-    INTERCEPTOR_SRCS := $(wildcard interceptor/*.c)
 
     ifeq ("$(wildcard /usr/include/bfd.h)","")
         WARN_LIBRARY += binutils-devel
@@ -71,7 +69,6 @@ ifeq ($(OS),Linux)
     # OS Linux
 else ifeq ($(OS),Darwin)
     ARCH := DARWIN
-    ARCH_DSUFFIX := .dylib
     CRASHWRANGLER := third_party/mac
     OS_VERSION := $(shell sw_vers -productVersion)
     ifneq (,$(findstring 10.11,$(OS_VERSION)))
@@ -98,7 +95,7 @@ else ifeq ($(OS),Darwin)
     CC := $(shell xcrun --sdk $(SDK_NAME) --find cc)
     LD := $(shell xcrun --sdk $(SDK_NAME) --find cc)
     ARCH_CFLAGS := -arch x86_64 -O3 -std=c99 -isysroot $(SDK) -I. \
-                   -x objective-c -pedantic \
+                   -x objective-c -pedantic -fblocks \
                    -Wimplicit -Wunused -Wcomment -Wchar-subscripts -Wuninitialized \
                    -Wreturn-type -Wpointer-arith -Wno-gnu-case-range -Wno-gnu-designator \
                    -Wno-deprecated-declarations -Wno-unknown-pragmas -Wno-attributes
@@ -116,21 +113,26 @@ else ifeq ($(OS),Darwin)
     # OS Darwin
 else
     ARCH := POSIX
-    ARCH_DSUFFIX := .so
-    CC ?= gcc
-    LD = $(CC)
     ARCH_SRCS := $(wildcard posix/*.c)
     ARCH_CFLAGS := -std=c11 -I. -I/usr/local/include -I/usr/include \
                    -Wextra -Wno-initializer-overrides -Wno-override-init \
                    -Wno-unknown-warning-option -Wno-unknown-pragmas \
-				   -funroll-loops -O2
+                   -U__STRICT_ANSI__ -funroll-loops -O2
     ARCH_LDFLAGS := -lpthread -L/usr/local/include -L/usr/include
     # OS Posix
 endif
 
+COMPILER = $(shell $(CC) -v 2>&1 | grep -E '(gcc|clang) version' | grep -oE '(clang|gcc)')
+ifeq ($(COMPILER),clang)
+    ARCH_CFLAGS += -fblocks
+    ARCH_LDFLAGS += -lBlocksRuntime
+endif
+
 SRCS := $(COMMON_SRCS) $(ARCH_SRCS)
 OBJS := $(SRCS:.c=.o)
-INTERCEPTOR_LIBS := $(INTERCEPTOR_SRCS:.c=$(ARCH_DSUFFIX))
+
+LIBS_SRCS := $(wildcard libraries/*.c)
+LIBS_OBJS := $(LIBS_SRCS:.c=.o)
 
 # Respect external user defines
 CFLAGS += $(COMMON_CFLAGS) $(ARCH_CFLAGS) -D_HF_ARCH_${ARCH}
@@ -138,6 +140,7 @@ LDFLAGS += $(COMMON_LDFLAGS) $(ARCH_LDFLAGS)
 
 ifeq ($(DEBUG),true)
     CFLAGS += -g -ggdb -DDEBUG_BUILD
+    LDFLAGS += -g -ggdb
 endif
 
 # Control Android builds
@@ -150,14 +153,14 @@ ifeq ($(ANDROID_DEBUG_ENABLED),true)
     NDK_BUILD_ARGS += V=1 NDK_DEBUG=1 APP_OPTIM=debug
 endif
 
-SUBDIR_ROOTS := linux mac posix interceptor
+SUBDIR_ROOTS := linux mac posix libraries
 DIRS := . $(shell find $(SUBDIR_ROOTS) -type d)
 CLEAN_PATTERNS := *.o *~ core *.a *.dSYM *.la *.so *.dylib
 SUBDIR_GARBAGE := $(foreach DIR,$(DIRS),$(addprefix $(DIR)/,$(CLEAN_PATTERNS)))
 MAC_GARGBAGE := $(wildcard mac/mach_exc*)
 ANDROID_GARBAGE := obj libs
 
-all: $(BIN) $(INTERCEPTOR_LIBS)
+all: $(BIN) $(LIBS_OBJS)
 
 %.o: %.c
 	$(CC) -c $(CFLAGS) -o $@ $<
@@ -192,22 +195,22 @@ android:
 
 # DO NOT DELETE
 
-honggfuzz.o: common.h cmdline.h log.h files.h fuzz.h util.h
+honggfuzz.o: common.h cmdline.h display.h log.h files.h fuzz.h util.h
 cmdline.o: cmdline.h common.h log.h files.h util.h
 display.o: common.h display.h log.h util.h
-log.o: log.h common.h
-files.o: common.h files.h log.h
-fuzz.o: common.h fuzz.h arch.h display.h files.h log.h mangle.h report.h
+files.o: common.h files.h log.h util.h
+fuzz.o: common.h fuzz.h arch.h files.h log.h mangle.h report.h sancov.h
 fuzz.o: util.h
-report.o: common.h report.h log.h util.h
+log.o: common.h log.h
 mangle.o: common.h mangle.h log.h util.h
+report.o: common.h report.h log.h util.h
+sancov.o: common.h sancov.h files.h log.h util.h
 util.o: common.h files.h log.h
-linux/ptrace_utils.o: common.h linux/ptrace_utils.h files.h linux/bfd.h
-linux/ptrace_utils.o: linux/unwind.h log.h util.h
-linux/sancov.o: common.h linux/sancov.h util.h files.h log.h
+linux/arch.o: common.h arch.h linux/perf.h linux/ptrace_utils.h log.h
+linux/arch.o: sancov.h util.h files.h
+linux/bfd.o: common.h linux/bfd.h linux/unwind.h files.h log.h util.h
 linux/perf.o: common.h linux/perf.h files.h linux/pt.h log.h util.h
-linux/bfd.o: common.h linux/bfd.h files.h log.h util.h
 linux/pt.o: common.h linux/pt.h log.h
+linux/ptrace_utils.o: common.h linux/ptrace_utils.h files.h linux/bfd.h
+linux/ptrace_utils.o: linux/unwind.h linux/unwind.h log.h sancov.h util.h
 linux/unwind.o: common.h linux/unwind.h log.h
-linux/arch.o: common.h arch.h linux/perf.h linux/ptrace_utils.h
-linux/arch.o: linux/sancov.h log.h util.h files.h
