@@ -451,14 +451,19 @@ bool files_procMapsToFile(pid_t pid, const char *fileName)
         PLOG_E("Couldn't open '%s' destination", fileName);
         return false;
     }
+    defer {
+        close(outFD);
+    };
 
     snprintf(fMaps, PATH_MAX, "/proc/%d/maps", pid);
 
     if ((f = fopen(fMaps, "rb")) == NULL) {
         PLOG_E("Couldn't open '%s' - R/O mode", fMaps);
-        close(outFD);
         return false;
     }
+    defer {
+        fclose(f);
+    };
 
     while (!feof(f)) {
         char readBuf[PROC_MAP_SZ + 128], perm[5], dev[7], name[PATH_MAX];
@@ -479,8 +484,6 @@ bool files_procMapsToFile(pid_t pid, const char *fileName)
         dprintf(outFD, "%016llx-%016llx (%lld KB)\t%s\t%lx\t%6s\t%ld\t'%.*s'\n",
                 start, end, (end - start) / 1024, perm, offset, dev, inode, PROC_MAP_SZ_, name);
     }
-    fclose(f);
-    close(outFD);
 
     return true;
 }
