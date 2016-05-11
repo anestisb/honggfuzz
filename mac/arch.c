@@ -194,7 +194,7 @@ static bool arch_analyzeSignal(honggfuzz_t * hfuzz, int status, fuzzer_t * fuzze
     }
 
     if (WIFEXITED(status) || WIFSIGNALED(status)) {
-        sancov_Analyze(hfuzz, fuzzer);
+        sancov_Analyze(hfuzz, fuzzer, fuzzer->pid);
     }
 
     /*

@@ -217,6 +217,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
             .pid = 0,
             .pidFile = NULL,
             .pidCmd = NULL,
+            .remotePIDE2E = false,
         },
     };
     /*  *INDENT-ON* */
@@ -253,8 +254,9 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         {{"persistent", no_argument, NULL, 'P'}, "Enable persistent fuzzing (link with libraries/persistent.mode.main.o)"},
 
 #if defined(_HF_ARCH_LINUX)
-        {{"linux_pid", required_argument, NULL, 'p'}, "Attach to a pid (and its thread group)"},
-        {{"linux_file_pid", required_argument, NULL, 0x502}, "Attach to pid (and its thread group) read from file"},
+        {{"linux_pid", required_argument, NULL, 'p'}, "Attach to a PID (and its thread group)"},
+        {{"linux_file_pid", required_argument, NULL, 0x502}, "Attach to PID (and its thread group) read from file"},
+        {{"linux_pid_e2e", no_argument, NULL, 0x505}, "Attach both to fuzzer spawned & remote PIDs (and their thread groups"},
         {{"linux_addr_low_limit", required_argument, NULL, 0x500}, "Address limit (from si.si_addr) below which crashes are not reported, (default: '0')"},
         {{"linux_keep_aslr", no_argument, NULL, 0x501}, "Don't disable ASLR randomization, might be useful with MSAN"},
         {{"linux_perf_ignore_above", required_argument, NULL, 0x503}, "Ignore perf events which report IPs above this address"},
@@ -367,6 +369,9 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
             break;
         case 0x502:
             hfuzz->linux.pidFile = optarg;
+            break;
+        case 0x505:
+            hfuzz->linux.remotePIDE2E = true;
             break;
         case 'E':
             for (size_t i = 0; i < ARRAYSIZE(hfuzz->envs); i++) {
