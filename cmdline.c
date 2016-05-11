@@ -462,6 +462,11 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         hfuzz->threadsMax = 1;
     }
 
+    if (hfuzz->linux.remotePIDE2E && (hfuzz->linux.pid == 0 && hfuzz->linux.pidFile == NULL)) {
+        LOG_E("Missing remote PID, cannot enable Linux e2e monitoring");
+        return false;
+    }
+
     if (hfuzz->origFlipRate == 0.0L && hfuzz->useVerifier) {
         LOG_I("Verifier enabled with 0.0 flipRate, activating dry run mode");
     }
