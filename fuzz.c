@@ -332,7 +332,8 @@ static bool fuzz_runVerifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
 #if defined(_HF_ARCH_LINUX)
                       .timerId = (timer_t) 0,
 #endif                          // defined(_HF_ARCH_LINUX)
-                      .attachedPid = 0,
+                      .fuzzerAttachedPid = 0,
+                      .remoteAttachedPid = 0,
                       .persistentSock = -1,
                       },
         };
@@ -827,7 +828,9 @@ static void *fuzz_threadNew(void *arg)
 #if defined(_HF_ARCH_LINUX)
         .linux.timerId = (timer_t) 0,
 #endif                          // defined(_HF_ARCH_LINUX)
-        .linux.attachedPid = 0,.linux.persistentSock = -1,
+        .linux.fuzzerAttachedPid = 0,
+        .linux.remoteAttachedPid = 0,
+        .linux.persistentSock = -1,
     };
     defer {
         free(fuzzer.dynamicFile);

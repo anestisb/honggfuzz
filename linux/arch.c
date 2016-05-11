@@ -66,12 +66,17 @@
 
 #define SIGNAL_TIMER (SIGRTMIN + 1)
 
-static inline bool arch_shouldAttach(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
+static inline bool arch_shouldAttachFuzzer(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 {
-    if (hfuzz->persistent && fuzzer->linux.attachedPid == fuzzer->pid) {
+    if (hfuzz->persistent && fuzzer->linux.fuzzerAttachedPid == fuzzer->pid) {
         return false;
     }
-    if (hfuzz->linux.pid > 0 && fuzzer->linux.attachedPid == hfuzz->linux.pid) {
+    return true;
+}
+
+static inline bool arch_shouldAttachRemote(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
+{
+    if (hfuzz->linux.pid > 0 && fuzzer->linux.remoteAttachedPid == hfuzz->linux.pid) {
         return false;
     }
     return true;
@@ -260,25 +265,45 @@ static bool arch_persistentSendFile(fuzzer_t * fuzzer)
 
 void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 {
-    pid_t ptracePid = (hfuzz->linux.pid > 0) ? hfuzz->linux.pid : fuzzer->pid;
-    pid_t childPid = fuzzer->pid;
+    /* Determine which endpoint needs to be traced */
+    bool attachFuzzerPid = false, attachRemotePid = false;
+    if (hfuzz->linux.remotePIDE2E) {
+        /* Monitor both endpoints (fuzzer & remote PID) */
+        attachFuzzerPid = true;
+        attachRemotePid = true;
+    } else if (hfuzz->linux.pid > 0) {
+        /* Just remote PID */
+        attachRemotePid = true;
+    } else {
+        /* Just the spawned fuzzer PID */
+        attachFuzzerPid = true;
+    }
+    pid_t fuzzerPid = fuzzer->pid;
 
     if (arch_setTimer(&(fuzzer->linux.timerId)) == false) {
         LOG_F("Couldn't set timer");
     }
 
-    if (hfuzz->persistent == false && arch_ptraceWaitForPidStop(childPid) == false) {
-        LOG_F("PID %d not in a stopped state", childPid);
+    if (hfuzz->persistent == false && arch_ptraceWaitForPidStop(fuzzerPid) == false) {
+        LOG_F("PID %d not in a stopped state", fuzzerPid);
     }
 
-    if (arch_shouldAttach(hfuzz, fuzzer) == true) {
-        if (arch_ptraceAttach(ptracePid) == false) {
-            LOG_F("arch_ptraceAttach(pid=%d) failed", ptracePid);
+    /* Attach to endpoints */
+    if (attachRemotePid & arch_shouldAttachRemote(hfuzz, fuzzer)) {
+        if (arch_ptraceAttach(hfuzz->linux.pid) == false) {
+            LOG_F("arch_ptraceAttach(pid=%d) failed", hfuzz->linux.pid);
         }
-        fuzzer->linux.attachedPid = ptracePid;
+        fuzzer->linux.remoteAttachedPid = hfuzz->linux.pid;
     }
-    /* A long-lived process could have already exited, and we wouldn't know */
-    if (kill(ptracePid, 0) == -1) {
+    if (attachFuzzerPid & arch_shouldAttachFuzzer(hfuzz, fuzzer)) {
+        if (arch_ptraceAttach(fuzzer->pid) == false) {
+            LOG_F("arch_ptraceAttach(pid=%d) failed", fuzzer->pid);
+        }
+        fuzzer->linux.fuzzerAttachedPid = fuzzer->pid;
+    }
+
+    /* A remote long-lived process could have already exited, and we wouldn't know */
+    if (attachRemotePid && kill(fuzzer->linux.remoteAttachedPid, 0) == -1) {
         if (hfuzz->linux.pidFile) {
             /* If pid from file, check again for cases of auto-restart daemons that update it */
             /*
@@ -293,18 +318,35 @@ void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
                            hfuzz->linux.pid);
                 } else {
                     LOG_D("Monitor PID has been updated (pid=%d)", hfuzz->linux.pid);
-                    ptracePid = hfuzz->linux.pid;
+                    fuzzer->linux.remoteAttachedPid = hfuzz->linux.pid;
                 }
             }
+        } else {
+            PLOG_F("Liveness of PID %d read from file questioned - abort",
+                   fuzzer->linux.remoteAttachedPid);
         }
     }
 
-    perfFd_t perfFds;
-    if (arch_perfEnable(ptracePid, hfuzz, fuzzer, &perfFds) == false) {
-        LOG_F("Couldn't enable perf counters for pid %d", ptracePid);
+    /* If persistent fuzzing check fuzzer PID still alive */
+    if (attachRemotePid && kill(fuzzer->linux.fuzzerAttachedPid, 0) == -1) {
+        PLOG_F("Liveness of PID %d read from file questioned - abort",
+               fuzzer->linux.fuzzerAttachedPid);
     }
-    if (kill(childPid, SIGCONT) == -1) {
-        PLOG_F("Restarting PID: %d failed", childPid);
+
+    perfFd_t perfFds;
+    if (attachRemotePid) {
+        if (arch_perfEnable(fuzzer->linux.remoteAttachedPid, hfuzz, fuzzer, &perfFds) == false) {
+            LOG_F("Couldn't enable perf counters for pid %d", fuzzer->linux.remoteAttachedPid);
+        }
+    }
+    if (attachFuzzerPid) {
+        if (arch_perfEnable(fuzzer->linux.fuzzerAttachedPid, hfuzz, fuzzer, &perfFds) == false) {
+            LOG_F("Couldn't enable perf counters for pid %d", fuzzer->linux.fuzzerAttachedPid);
+        }
+    }
+
+    if (kill(fuzzerPid, SIGCONT) == -1) {
+        PLOG_F("Restarting PID: %d failed", fuzzerPid);
     }
     if (hfuzz->persistent == true && arch_persistentSendFile(fuzzer) == false) {
         LOG_W("Could not send file contents to the persistent process");
@@ -332,10 +374,17 @@ void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
         }
 
         char statusStr[4096];
-        LOG_D("PID '%d' returned with status: %s", pid,
-              subproc_StatusToStr(status, statusStr, sizeof(statusStr)));
+        LOG_D("PID '%d' returned with status: %s (fuzzerPid:%d)", pid,
+              subproc_StatusToStr(status, statusStr, sizeof(statusStr)), fuzzerPid);
 
-        arch_ptraceGetCustomPerf(hfuzz, ptracePid, &fuzzer->linux.hwCnts.customCnt);
+        if (attachRemotePid) {
+            arch_ptraceGetCustomPerf(hfuzz, fuzzer->linux.remoteAttachedPid,
+                                     &fuzzer->linux.hwCnts.customCnt);
+        }
+        if (attachFuzzerPid) {
+            arch_ptraceGetCustomPerf(hfuzz, fuzzer->linux.fuzzerAttachedPid,
+                                     &fuzzer->linux.hwCnts.customCnt);
+        }
 
         if (hfuzz->persistent && pid == fuzzer->persistentPid
             && (WIFEXITED(status) || WIFSIGNALED(status))) {
@@ -344,18 +393,28 @@ void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
                   subproc_StatusToStr(status, statusStr, sizeof(statusStr)));
             break;
         }
-        if (ptracePid == childPid) {
-            arch_ptraceAnalyze(hfuzz, status, pid, fuzzer);
-            continue;
-        }
-        if (pid == childPid && (WIFEXITED(status) || WIFSIGNALED(status))) {
-            break;
-        }
-        if (pid == childPid) {
-            continue;
-        }
 
-        arch_ptraceAnalyze(hfuzz, status, pid, fuzzer);
+        /* If E2E monitoring, always analyze and check fuzzer pid for exit */
+        if (attachRemotePid && attachFuzzerPid) {
+            arch_ptraceAnalyze(hfuzz, status, pid, fuzzer);
+            if (pid == fuzzerPid && (WIFEXITED(status) || WIFSIGNALED(status))) {
+                break;
+            }
+            continue;
+        } else {
+            if (attachFuzzerPid) {
+                arch_ptraceAnalyze(hfuzz, status, pid, fuzzer);
+                continue;
+            }
+            if (pid == fuzzerPid && (WIFEXITED(status) || WIFSIGNALED(status))) {
+                break;
+            }
+            if (pid == fuzzerPid) {
+                continue;
+            }
+
+            arch_ptraceAnalyze(hfuzz, status, pid, fuzzer);
+        }
     }
 
 #if !_HF_MONITOR_SIGABRT
@@ -369,19 +428,41 @@ void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
      * will get caught from ptrace API, handling the discovered ASan internal crash.
      */
     char crashReport[PATH_MAX] = { 0 };
-    snprintf(crashReport, sizeof(crashReport), "%s/%s.%d", hfuzz->workDir, kLOGPREFIX, ptracePid);
-    if (files_exists(crashReport)) {
-        LOG_W("Un-handled ASan report due to compiler-rt internal error - retry with '%s' (%s)",
-              crashReport, fuzzer->fileName);
+    if (attachRemotePid) {
+        snprintf(crashReport, sizeof(crashReport), "%s/%s.%d", hfuzz->workDir, kLOGPREFIX,
+                 fuzzer->linux.remoteAttachedPid);
+        if (files_exists(crashReport)) {
+            LOG_W("Un-handled ASan report due to compiler-rt internal error - retry with '%s' (%s)",
+                  crashReport, fuzzer->fileName);
 
-        /* Manually set the exitcode to ASan to trigger report parsing */
-        arch_ptraceExitAnalyze(hfuzz, ptracePid, fuzzer, HF_ASAN_EXIT_CODE);
+            /* Manually set the exitcode to ASan to trigger report parsing */
+            arch_ptraceExitAnalyze(hfuzz, fuzzer->linux.remoteAttachedPid, fuzzer,
+                                   HF_ASAN_EXIT_CODE);
+        }
+    }
+
+    if (attachFuzzerPid) {
+        snprintf(crashReport, sizeof(crashReport), "%s/%s.%d", hfuzz->workDir, kLOGPREFIX,
+                 fuzzer->linux.fuzzerAttachedPid);
+        if (files_exists(crashReport)) {
+            LOG_W("Un-handled ASan report due to compiler-rt internal error - retry with '%s' (%s)",
+                  crashReport, fuzzer->fileName);
+
+            /* Manually set the exitcode to ASan to trigger report parsing */
+            arch_ptraceExitAnalyze(hfuzz, fuzzer->linux.fuzzerAttachedPid, fuzzer,
+                                   HF_ASAN_EXIT_CODE);
+        }
     }
 #endif
 
     arch_removeTimer(&fuzzer->linux.timerId);
     arch_perfAnalyze(hfuzz, fuzzer, &perfFds);
-    sancov_Analyze(hfuzz, fuzzer);
+    if (attachRemotePid) {
+        sancov_Analyze(hfuzz, fuzzer, fuzzer->linux.remoteAttachedPid);
+    }
+    if (attachFuzzerPid) {
+        sancov_Analyze(hfuzz, fuzzer, fuzzer->linux.fuzzerAttachedPid);
+    }
 }
 
 bool arch_archInit(honggfuzz_t * hfuzz)
