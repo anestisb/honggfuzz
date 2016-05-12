@@ -106,7 +106,7 @@ LOCAL_CFLAGS := -std=c11 -I. \
     -D_GNU_SOURCE \
     -Wall -Wextra -Wno-initializer-overrides -Wno-override-init \
     -Wno-unknown-warning-option -Werror -funroll-loops -O2 \
-    -Wframe-larger-than=51200
+    -Wframe-larger-than=131072
 LOCAL_LDFLAGS := -lm -latomic
 
 ifeq ($(ANDROID_WITH_PTRACE),true)
