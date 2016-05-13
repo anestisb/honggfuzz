@@ -515,7 +515,6 @@ static bool fuzz_runSimplifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
                       .timerId = (timer_t) 0,
 #endif                          // defined(_HF_ARCH_LINUX)
                       .fuzzerAttachedPid = 0,
-                      .remoteAttachedPid = 0,
                       .persistentSock = -1,
                       },
         };
