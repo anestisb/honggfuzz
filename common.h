@@ -296,6 +296,7 @@ typedef struct {
         const char *pidFile;
         char *pidCmd;
         bool remotePIDE2E;
+        bool remotePidAttached;
     } linux;
 } honggfuzz_t;
 
@@ -324,7 +325,6 @@ typedef struct {
         uint8_t *perfMmapAux;
         hwcnt_t hwCnts;
         pid_t fuzzerAttachedPid;
-        pid_t remoteAttachedPid;
         int persistentSock;
 #if defined(_HF_ARCH_LINUX)
         timer_t timerId;

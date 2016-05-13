@@ -1035,7 +1035,7 @@ static void arch_ptraceExitSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * f
     if (exitCode == HF_ASAN_EXIT_CODE) {
 
         /* ASan is saving reports against parent PID */
-        if (fuzzer->linux.remoteAttachedPid != pid && fuzzer->linux.fuzzerAttachedPid != pid) {
+        if (hfuzz->linux.pid != pid && fuzzer->linux.fuzzerAttachedPid != pid) {
             return;
         }
         funcCnt = arch_parseAsanReport(hfuzz, pid, funcs, &crashAddr, &op);

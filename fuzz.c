@@ -333,7 +333,6 @@ static bool fuzz_runVerifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
                       .timerId = (timer_t) 0,
 #endif                          // defined(_HF_ARCH_LINUX)
                       .fuzzerAttachedPid = 0,
-                      .remoteAttachedPid = 0,
                       .persistentSock = -1,
                       },
         };
@@ -651,7 +650,6 @@ static void *fuzz_threadNew(void *arg)
         .linux.timerId = (timer_t) 0,
 #endif                          // defined(_HF_ARCH_LINUX)
         .linux.fuzzerAttachedPid = 0,
-        .linux.remoteAttachedPid = 0,
         .linux.persistentSock = -1,
     };
     defer {
