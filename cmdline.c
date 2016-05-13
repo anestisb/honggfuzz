@@ -225,6 +225,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
             .pidFile = NULL,
             .pidCmd = NULL,
             .remotePIDE2E = false,
+            .remotePidAttached = false,
         },
     };
     /*  *INDENT-ON* */
