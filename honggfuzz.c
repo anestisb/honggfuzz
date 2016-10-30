@@ -31,6 +31,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #include "common.h"
 #include "cmdline.h"
@@ -116,6 +117,37 @@ static void setupSignalsPostThr(void)
     }
 }
 
+#if defined(__ANDROID__)
+#define sysBat "/sys/class/power_supply/battery/capacity"
+#define capacityThreshold 10
+static bool checkBatteryCapacity()
+{
+    /* Battery capacity exposed from sysfs */
+    uint8_t capacityStr[128] = { 0 };
+
+    int fd = open(sysBat, O_RDONLY, 0);
+    if (fd == -1) {
+        PLOG_W("Couldn't open() '%s' file in R/O mode", sysBat);
+        return false;
+    }
+    defer {
+        close(fd);
+    }
+
+    if (files_readFromFd(fd, capacityStr, sizeof(capacityStr)) <= 0) {
+        LOG_W("Couldn't read battery status");
+        return false;
+    }
+
+    int batLevel = atoi((char*)capacityStr);
+    if (batLevel < capacityThreshold) {
+        LOG_I("Stopping due to battery level below %d%%", capacityThreshold);
+        return true;
+    }
+    return false;
+}
+#endif
+
 int main(int argc, char **argv)
 {
     /*
@@ -174,6 +206,11 @@ int main(int argc, char **argv)
         if (ATOMIC_GET(hfuzz.threadsFinished) >= hfuzz.threadsMax) {
             break;
         }
+#if defined(__ANDROID__)
+        if (checkBatteryCapacity()) {
+            break;
+        }
+#endif
         pause();
     }
 
