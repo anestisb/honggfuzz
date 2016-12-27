@@ -132,7 +132,7 @@ static bool checkBatteryCapacity()
     }
     defer {
         close(fd);
-    }
+    };
 
     if (files_readFromFd(fd, capacityStr, sizeof(capacityStr)) <= 0) {
         LOG_W("Couldn't read battery status");
