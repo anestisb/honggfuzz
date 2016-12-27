@@ -244,12 +244,12 @@ static ssize_t honggfuzz_process_vm_readv(pid_t pid,
 #endif                          /* defined(__ANDROID__) */
 
 /*  *INDENT-OFF* */
-struct {
+static struct {
     const char *descr;
     bool important;
-} arch_sigs[NSIG] = {
-    [0 ... (NSIG - 1)].important = false,
-    [0 ... (NSIG - 1)].descr = "UNKNOWN",
+} arch_sigs[_NSIG + 1] = {
+    [0 ... (_NSIG)].important = false,
+    [0 ... (_NSIG)].descr = "UNKNOWN",
 
     [SIGTRAP].important = false,
     [SIGTRAP].descr = "SIGTRAP",
@@ -271,13 +271,37 @@ struct {
 #else
     [SIGABRT].important = false,
 #endif
-    [SIGABRT].descr = "SIGABRT"
+    [SIGABRT].descr = "SIGABRT",
+
+    [SIGVTALRM].important = true,
+    [SIGVTALRM].descr = "SIGVTALRM-TMOUT",
 };
 /*  *INDENT-ON* */
 
 #ifndef SI_FROMUSER
 #define SI_FROMUSER(siptr)      ((siptr)->si_code <= 0)
 #endif                          /* SI_FROMUSER */
+
+extern const char *sys_sigabbrev[];
+
+static __thread char arch_signame[32];
+static const char *arch_sigName(int signo)
+{
+    if (signo < 0 || signo > _NSIG) {
+        snprintf(arch_signame, sizeof(arch_signame), "UNKNOWN-%d", signo);
+        return arch_signame;
+    }
+    if (signo > __SIGRTMIN) {
+        snprintf(arch_signame, sizeof(arch_signame), "SIG%d-RTMIN+%d", signo, signo - __SIGRTMIN);
+        return arch_signame;
+    }
+#ifdef __ANDROID__
+    return arch_sigs[signo].descr;
+#else
+    snprintf(arch_signame, sizeof(arch_signame), "SIG%s", sys_sigabbrev[signo]);
+    return arch_signame;
+#endif                          /* __ANDROID__ */
+}
 
 static inline char *arch_sanCodeToStr(int exitCode)
 {
@@ -336,62 +360,6 @@ static size_t arch_getProcMem(pid_t pid, uint8_t * buf, size_t len, REG_TYPE pc)
         memcpy(&buf[x * sizeof(long)], &ret, sizeof(long));
     }
     return memsz;
-}
-
-void arch_ptraceGetCustomPerf(honggfuzz_t * hfuzz, pid_t pid, uint64_t * cnt UNUSED)
-{
-    if ((hfuzz->dynFileMethod & _HF_DYNFILE_CUSTOM) == 0) {
-        return;
-    }
-
-    if (hfuzz->persistent) {
-        ptrace(PTRACE_INTERRUPT, pid, 0, 0);
-        arch_ptraceWaitForPidStop(pid);
-    }
-
-    defer {
-        if (hfuzz->persistent) {
-            ptrace(PTRACE_CONT, pid, 0, 0);
-        }
-    };
-
-#if defined(__x86_64__)
-    struct user_regs_struct_64 regs;
-    if (ptrace(PTRACE_GETREGS, pid, 0, &regs) != -1) {
-        *cnt = regs.gs_base;
-        return;
-    }
-#endif                          /*       defined(__x86_64__) */
-    *cnt = 0ULL;
-}
-
-void arch_ptraceSetCustomPerf(honggfuzz_t * hfuzz, pid_t pid, uint64_t cnt UNUSED)
-{
-    if ((hfuzz->dynFileMethod & _HF_DYNFILE_CUSTOM) == 0) {
-        return;
-    }
-
-    if (hfuzz->persistent) {
-        ptrace(PTRACE_INTERRUPT, pid, 0, 0);
-        arch_ptraceWaitForPidStop(pid);
-    }
-
-    defer {
-        if (hfuzz->persistent) {
-            ptrace(PTRACE_CONT, pid, 0, 0);
-        }
-    };
-
-#if defined(__x86_64__)
-    struct user_regs_struct_64 regs;
-    if (ptrace(PTRACE_GETREGS, pid, 0, &regs) == -1) {
-        return;
-    }
-    regs.gs_base = cnt;
-    if (ptrace(PTRACE_SETREGS, pid, 0, &regs) == -1) {
-        return;
-    }
-#endif                          /*            defined(__x86_64__) */
 }
 
 static size_t arch_getPC(pid_t pid, REG_TYPE * pc, REG_TYPE * status_reg UNUSED)
@@ -620,7 +588,7 @@ arch_ptraceGenerateReport(pid_t pid, fuzzer_t * fuzzer, funcs_t * funcs, size_t 
                    fuzzer->crashFileName);
     util_ssnprintf(fuzzer->report, sizeof(fuzzer->report), "PID: %d\n", pid);
     util_ssnprintf(fuzzer->report, sizeof(fuzzer->report), "SIGNAL: %s (%d)\n",
-                   arch_sigs[si->si_signo].descr, si->si_signo);
+                   arch_sigName(si->si_signo), si->si_signo);
     util_ssnprintf(fuzzer->report, sizeof(fuzzer->report), "FAULT ADDRESS: %p\n",
                    SI_FROMUSER(si) ? NULL : si->si_addr);
     util_ssnprintf(fuzzer->report, sizeof(fuzzer->report), "INSTRUCTION: %s\n", instr);
@@ -721,7 +689,7 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
 
     if (!SI_FROMUSER(&si) && pc && si.si_addr < hfuzz->linux.ignoreAddr) {
         LOG_I("'%s' is interesting (%s), but the si.si_addr is %p (below %p), skipping",
-              fuzzer->fileName, arch_sigs[si.si_signo].descr, si.si_addr, hfuzz->linux.ignoreAddr);
+              fuzzer->fileName, arch_sigName(si.si_signo), si.si_addr, hfuzz->linux.ignoreAddr);
         return;
     }
 
@@ -860,14 +828,14 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
     } else if (saveUnique) {
         snprintf(fuzzer->crashFileName, sizeof(fuzzer->crashFileName),
                  "%s/%s.PC.%" REG_PM ".STACK.%" PRIx64 ".CODE.%d.ADDR.%p.INSTR.%s.%s",
-                 hfuzz->workDir, arch_sigs[si.si_signo].descr, pc, fuzzer->backtrace,
+                 hfuzz->workDir, arch_sigName(si.si_signo), pc, fuzzer->backtrace,
                  si.si_code, sig_addr, instr, hfuzz->fileExtn);
     } else {
         char localtmstr[PATH_MAX];
         util_getLocalTime("%F.%H:%M:%S", localtmstr, sizeof(localtmstr), time(NULL));
         snprintf(fuzzer->crashFileName, sizeof(fuzzer->crashFileName),
                  "%s/%s.PC.%" REG_PM ".STACK.%" PRIx64 ".CODE.%d.ADDR.%p.INSTR.%s.%s.%d.%s",
-                 hfuzz->workDir, arch_sigs[si.si_signo].descr, pc, fuzzer->backtrace,
+                 hfuzz->workDir, arch_sigName(si.si_signo), pc, fuzzer->backtrace,
                  si.si_code, sig_addr, instr, localtmstr, pid, hfuzz->fileExtn);
     }
 
@@ -1418,11 +1386,13 @@ bool arch_ptraceWaitForPidStop(pid_t pid)
 }
 
 #define MAX_THREAD_IN_TASK 4096
-bool arch_ptraceAttach(pid_t pid)
+bool arch_ptraceAttach(honggfuzz_t * hfuzz, pid_t pid)
 {
-    static const long seize_options =
-        PTRACE_O_TRACECLONE | PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK | PTRACE_O_TRACEEXIT |
-        PTRACE_O_EXITKILL;
+    long seize_options =
+        PTRACE_O_TRACECLONE | PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK | PTRACE_O_TRACEEXIT;
+    if (hfuzz->linux.pid == 0) {
+        seize_options |= PTRACE_O_EXITKILL;
+    }
 
     if (ptrace(PTRACE_SEIZE, pid, NULL, seize_options) == -1) {
         PLOG_W("Couldn't ptrace(PTRACE_SEIZE) to pid: %d", pid);
