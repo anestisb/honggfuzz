@@ -622,6 +622,21 @@ arch_ptraceGenerateReport(pid_t pid, fuzzer_t * fuzzer, funcs_t * funcs, size_t 
     return;
 }
 
+static void arch_ptraceSaveProcMaps(honggfuzz_t * hfuzz, pid_t pid, const char *crashFileName)
+{
+    /* Save proc maps for every crash added to report */
+    if (hfuzz->linux.saveMaps) {
+        char *lastDot = strrchr(crashFileName, '.');
+        int baseNameLen = lastDot - crashFileName;
+        char mapsFile[PATH_MAX] = { 0 };
+        snprintf(mapsFile, PATH_MAX, "%s/%.*s.maps", hfuzz->workDir, baseNameLen, crashFileName);
+
+        if (files_procMapsToFile(pid, mapsFile) == false) {
+            LOG_E("Failed to write maps file (pid=%d", pid);
+        }
+    }
+}
+
 static void arch_ptraceAnalyzeData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzzer)
 {
     REG_TYPE pc = 0, status_reg = 0;
@@ -860,6 +875,7 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
     ATOMIC_CLEAR(hfuzz->dynFileIterExpire);
 
     arch_ptraceGenerateReport(pid, fuzzer, funcs, funcCnt, &si, instr);
+    arch_ptraceSaveProcMaps(hfuzz, pid, fuzzer->crashFileName);
 }
 
 static int arch_parseAsanReport(honggfuzz_t * hfuzz, pid_t pid, funcs_t * funcs, void **crashAddr,

@@ -66,4 +66,8 @@ extern struct paths_t *files_getFileFromFileq(honggfuzz_t * hfuzz, size_t index)
 
 extern size_t files_parseSymbolFilter(const char *inFIle, char ***filterList);
 
+#if defined(_HF_ARCH_LINUX)
+bool files_procMapsToFile(pid_t pid, const char *fileName);
+#endif
+
 #endif
