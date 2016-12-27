@@ -284,6 +284,7 @@ typedef struct {
         const char *symsWlFile;
         char **symsWl;
         size_t symsWlCnt;
+        bool saveMaps;
     } linux;
 } honggfuzz_t;
 

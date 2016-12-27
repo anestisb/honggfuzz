@@ -234,6 +234,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
             .symsWlFile = NULL,
             .symsWlCnt = 0,
             .symsWl = NULL,
+            .saveMaps = false,
         },
     };
     /*  *INDENT-ON* */
@@ -276,6 +277,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         {{"tmout_sigvtalrm", no_argument, NULL, 'T'}, "Use SIGVTALRM to kill timeouting processes (default: use SIGKILL)"},
 
 #if defined(_HF_ARCH_LINUX)
+        {{"linux_save_maps", no_argument, NULL, 0x506}, "Save target pid ProcFS maps (default: false)"},
         {{"linux_symbols_bl", required_argument, NULL, 0x504}, "Symbols blacklist filter file (one entry per line)"},
         {{"linux_symbols_wl", required_argument, NULL, 0x505}, "Symbols whitelist filter file (one entry per line)"},
         {{"linux_pid", required_argument, NULL, 'p'}, "Attach to a pid (and its thread group)"},
@@ -432,6 +434,9 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
             break;
         case 0x505:
             hfuzz->linux.symsWlFile = optarg;
+            break;
+        case 0x506:
+            hfuzz->linux.saveMaps = true;
             break;
         case 0x510:
             hfuzz->dynFileMethod |= _HF_DYNFILE_INSTR_COUNT;
