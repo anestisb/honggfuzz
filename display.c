@@ -68,13 +68,13 @@ static void display_printKMG(uint64_t val)
     }
 }
 
-static double getCpuUse(long num_cpu)
+static unsigned getCpuUse(long num_cpu)
 {
     static uint64_t prevIdleT = 0UL;
 
     FILE *f = fopen("/proc/stat", "re");
     if (f == NULL) {
-        return NAN;
+        return 0;
     }
     defer {
         fclose(f);
@@ -84,17 +84,17 @@ static double getCpuUse(long num_cpu)
         (f, "cpu  %" PRIu64 "%" PRIu64 "%" PRIu64 "%" PRIu64, &userT, &niceT, &systemT,
          &idleT) != 4) {
         LOG_W("fscanf('/proc/stat') != 4");
-        return NAN;
+        return 0;
     }
 
     if (prevIdleT == 0UL) {
         prevIdleT = idleT;
-        return NAN;
+        return 0;
     }
 
     uint64_t cpuUse = (num_cpu * sysconf(_SC_CLK_TCK)) - (idleT - prevIdleT);
     prevIdleT = idleT;
-    return (double)cpuUse / sysconf(_SC_CLK_TCK) * 100;
+    return cpuUse * 100 / sysconf(_SC_CLK_TCK);
 }
 
 static void display_displayLocked(honggfuzz_t * hfuzz)
@@ -141,23 +141,23 @@ static void display_displayLocked(honggfuzz_t * hfuzz)
     MX_SCOPED_LOCK(logMutexGet());
 
     display_put("%s", ESC_CLEAR);
-    display_put("----------------------------[ %s v%s ]---------------------------\n",
-                PROG_NAME, PROG_VERSION);
+    display_put("----------------------------[ " ESC_BOLD "%s v%s" ESC_RESET
+                " ]---------------------------\n", PROG_NAME, PROG_VERSION);
     display_put("  Iterations : " ESC_BOLD "%" _HF_MONETARY_MOD "zu" ESC_RESET, curr_exec_cnt);
     display_printKMG(curr_exec_cnt);
     if (hfuzz->mutationsMax) {
-        display_put(" (out of: " ESC_BOLD "%zu" ESC_RESET " [" ESC_BOLD "%.2f" ESC_RESET
-                    "%%])", hfuzz->mutationsMax, exeProgress);
+        display_put(" (out of: " ESC_BOLD "%" _HF_MONETARY_MOD "zu" ESC_RESET " [" ESC_BOLD "%.2f"
+                    ESC_RESET "%%])", hfuzz->mutationsMax, exeProgress);
     }
     switch (ATOMIC_GET(hfuzz->state)) {
     case _HF_STATE_STATIC:
-        display_put("\n       Phase : " ESC_BOLD "Static Main" ESC_RESET);
+        display_put("\n       Phase : " ESC_BOLD "Main" ESC_RESET);
         break;
     case _HF_STATE_DYNAMIC_PRE:
-        display_put("\n       Phase : " ESC_BOLD "Dynamic Pre" ESC_RESET);
+        display_put("\n       Phase : " ESC_BOLD "Dry Run (1/2)" ESC_RESET);
         break;
     case _HF_STATE_DYNAMIC_MAIN:
-        display_put("\n       Phase : " ESC_BOLD "Dynamic Main" ESC_RESET);
+        display_put("\n       Phase : " ESC_BOLD "Dynamic Main (2/2)" ESC_RESET);
         break;
     default:
         display_put("\n       Phase : " ESC_BOLD "Unknown" ESC_RESET);
@@ -180,9 +180,9 @@ static void display_displayLocked(honggfuzz_t * hfuzz)
     if (num_cpu == 0) {
         num_cpu = sysconf(_SC_NPROCESSORS_ONLN);
     }
-    double cpuUse = getCpuUse(num_cpu);
+    unsigned cpuUse = getCpuUse(num_cpu);
     display_put("     Threads : " ESC_BOLD "%zu" ESC_RESET ", CPUs: " ESC_BOLD "%ld" ESC_RESET
-                ", CPU: " ESC_BOLD "%.1lf" ESC_RESET "%% (" ESC_BOLD "%.1lf" ESC_RESET "%%/CPU)\n",
+                ", CPU: " ESC_BOLD "%u" ESC_RESET "%% (" ESC_BOLD "%u" ESC_RESET "%%/CPU)\n",
                 hfuzz->threadsMax, num_cpu, cpuUse, cpuUse / num_cpu);
 
     display_put("       Speed : " ESC_BOLD "% " _HF_MONETARY_MOD "zu" ESC_RESET "/sec"
@@ -233,11 +233,6 @@ static void display_displayLocked(honggfuzz_t * hfuzz)
         display_put("       *** PT blocks:      " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET
                     "\n", ATOMIC_GET(hfuzz->linux.hwCnts.bbCnt));
     }
-    if (hfuzz->dynFileMethod & _HF_DYNFILE_CUSTOM) {
-        display_put("       *** custom counter: " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET
-                    "\n", ATOMIC_GET(hfuzz->linux.hwCnts.customCnt));
-    }
-
     if (hfuzz->dynFileMethod & _HF_DYNFILE_SOFT) {
         uint64_t softCntPc = ATOMIC_GET(hfuzz->linux.hwCnts.softCntPc);
         uint64_t softCntCmp = ATOMIC_GET(hfuzz->linux.hwCnts.softCntCmp);
@@ -260,7 +255,8 @@ static void display_displayLocked(honggfuzz_t * hfuzz)
         display_put("       *** crashes:        " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET
                     "\n", ATOMIC_GET(hfuzz->sanCovCnts.crashesCnt));
     }
-    display_put("-----------------------------------[ LOGS ]-----------------------------------\n");
+    display_put("-----------------------------------[ " ESC_BOLD "LOGS" ESC_RESET
+                " ]-----------------------------------\n");
 }
 
 extern void display_display(honggfuzz_t * hfuzz)

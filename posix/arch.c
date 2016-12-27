@@ -57,14 +57,21 @@ struct {
 
     [SIGILL].important = true,
     [SIGILL].descr = "SIGILL",
+
     [SIGFPE].important = true,
     [SIGFPE].descr = "SIGFPE",
+
     [SIGSEGV].important = true,
     [SIGSEGV].descr = "SIGSEGV",
+
     [SIGBUS].important = true,
     [SIGBUS].descr = "SIGBUS",
+
     [SIGABRT].important = true,
-    [SIGABRT].descr = "SIGABRT"
+    [SIGABRT].descr = "SIGABRT",
+
+    [SIGVTALRM].important = true,
+    [SIGVTALRM].descr = "SIGVTALRM-TMOUT",
 };
 /*  *INDENT-ON* */
 
@@ -180,14 +187,15 @@ void arch_prepareChild(honggfuzz_t * hfuzz UNUSED, fuzzer_t * fuzzer UNUSED)
 void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 {
     for (;;) {
-        subproc_checkTimeLimit(hfuzz, fuzzer);
-
         if (hfuzz->persistent) {
             struct pollfd pfd = {
                 .fd = fuzzer->persistentSock,
                 .events = POLLIN,
             };
             int r = poll(&pfd, 1, -1);
+            if (r == -1 && errno == EINTR) {
+                subproc_checkTimeLimit(hfuzz, fuzzer);
+            }
             if (r == -1 && errno != EINTR) {
                 PLOG_F("poll(fd=%d)", fuzzer->persistentSock);
             }
@@ -200,6 +208,7 @@ void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
         int flags = hfuzz->persistent ? WNOHANG : 0;
         int ret = waitpid(fuzzer->pid, &status, flags);
         if (ret == -1 && errno == EINTR) {
+            subproc_checkTimeLimit(hfuzz, fuzzer);
             continue;
         }
         if (ret == -1) {

@@ -109,14 +109,12 @@ typedef enum {
     _HF_DYNFILE_BTS_BLOCK = 0x8,
     _HF_DYNFILE_BTS_EDGE = 0x10,
     _HF_DYNFILE_IPT_BLOCK = 0x20,
-    _HF_DYNFILE_CUSTOM = 0x40,
-    _HF_DYNFILE_SOFT = 0x80,
+    _HF_DYNFILE_SOFT = 0x40,
 } dynFileMethod_t;
 
 typedef struct {
     uint64_t cpuInstrCnt;
     uint64_t cpuBranchCnt;
-    uint64_t customCnt;
     uint64_t bbCnt;
     uint64_t newBBCnt;
     uint64_t softCntPc;
@@ -208,7 +206,7 @@ typedef struct {
 
 typedef struct {
     char **cmdline;
-    char cmdline_txt[PATH_MAX];
+    char cmdline_txt[61];
     char *inputDir;
     bool nullifyStdio;
     bool fuzzStdin;
@@ -239,6 +237,7 @@ typedef struct {
     bool clearEnv;
     char *envs[128];
     bool persistent;
+    bool tmout_vtalrm;
 
     const char *dictionaryFile;
      TAILQ_HEAD(, strings_t) dictq;
@@ -306,6 +305,7 @@ typedef struct {
     size_t dynamicFileSz;
     uint32_t fuzzNo;
     int persistentSock;
+    bool tmOutSignaled;
 #if !defined(_HF_ARCH_DARWIN)
     timer_t timerId;
 #endif                          // !defined(_HF_ARCH_DARWIN)
