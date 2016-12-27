@@ -144,55 +144,16 @@ esac
 # TODO: Automate global patching when all archs have been tested
 
 # Ptrace patches due to Android incompatibilities
-patch -N --dry-run --silent src/ptrace/_UPT_access_reg.c < ../patches/ptrace-libunwind_1.patch &>/dev/null
+git apply --check ../patches/libunwind.patch
 if [ $? -eq 0 ]; then
-  patch src/ptrace/_UPT_access_reg.c < ../patches/ptrace-libunwind_1.patch
+  git apply ../patches/libunwind.patch
   if [ $? -ne 0 ]; then
-    echo "[-] ptrace-libunwind_1 patch failed"
+    echo "[-] Failed to apply libunwind patches"
     abort 1
   fi
-fi
-
-patch -N --dry-run --silent src/ptrace/_UPT_access_fpreg.c < ../patches/ptrace-libunwind_2.patch &>/dev/null
-if [ $? -eq 0 ]; then
-  patch src/ptrace/_UPT_access_fpreg.c < ../patches/ptrace-libunwind_2.patch
-  if [ $? -ne 0 ]; then
-    echo "[-] ptrace-libunwind_2 patch failed"
-    abort 1
-  fi
-fi
-
-if [ "$ARCH" == "arm64" ]; then
-  # Missing libc functionality
-  patch -N --dry-run --silent include/libunwind-aarch64.h < ../patches/aarch64-libunwind_1.patch &>/dev/null
-  if [ $? -eq 0 ]; then
-    patch include/libunwind-aarch64.h < ../patches/aarch64-libunwind_1.patch
-    if [ $? -ne 0 ]; then
-      echo "[-] aarch64-libunwind_1 patch failed"
-      abort 1
-    fi
-  fi
-  # Frames ip bugs
-  patch -N --dry-run --silent src/aarch64/Gstep.c < ../patches/aarch64-libunwind_2.patch &>/dev/null
-  if [ $? -eq 0 ]; then
-    patch src/aarch64/Gstep.c < ../patches/aarch64-libunwind_2.patch
-    if [ $? -ne 0 ]; then
-      echo "[-] aarch64-libunwind_2 patch failed"
-      abort 1
-    fi
-  fi
-fi
-
-if [ "$ARCH" == "x86" ]; then
-  # Missing syscalls
-  patch -N --dry-run --silent src/x86/Gos-linux.c < ../patches/x86-libunwind.patch &>/dev/null
-  if [ $? -eq 0 ]; then
-    patch src/x86/Gos-linux.c < ../patches/x86-libunwind.patch
-    if [ $? -ne 0 ]; then
-      echo "[-] x86-libunwind patch failed"
-      abort 1
-    fi
-  fi
+else
+  echo "[-] Cannot apply libunwind patches"
+  abort 1
 fi
 
 # Support both Linux & Darwin
