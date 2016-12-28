@@ -48,6 +48,7 @@
 #include "log.h"
 #include "mangle.h"
 #include "report.h"
+#include "sanitizers.h"
 #include "sancov.h"
 #include "subproc.h"
 #include "util.h"
@@ -256,6 +257,9 @@ static bool fuzz_runVerifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
         if (subproc_Run(hfuzz, &vFuzzer) == false) {
             LOG_F("subproc_Run()");
         }
+
+        /* Delete intermediate files generated from verifier */
+        unlink(vFuzzer.fileName);
 
         /* If stack hash doesn't match skip name tag and exit */
         if (crashedFuzzer->backtrace != vFuzzer.backtrace) {
@@ -616,6 +620,9 @@ void fuzz_threads(honggfuzz_t * hfuzz)
 
     if (!arch_archInit(hfuzz)) {
         LOG_F("Couldn't prepare arch for fuzzing");
+    }
+    if (!sanitizers_Init(hfuzz)) {
+        LOG_F("Couldn't prepare sanitizer options");
     }
     if (!sancov_Init(hfuzz)) {
         LOG_F("Couldn't prepare sancov options");
