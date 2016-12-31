@@ -120,13 +120,16 @@ static void setupSignalsPostThr(void)
 #if defined(__ANDROID__)
 #define sysBat "/sys/class/power_supply/battery/capacity"
 #define capacityThreshold 10
-static bool checkBatteryCapacity()
+static bool checkBatteryCapacity(bool *batCheckEnabled)
 {
     /* Battery capacity exposed from sysfs */
     uint8_t capacityStr[128] = { 0 };
 
     int fd = open(sysBat, O_RDONLY, 0);
     if (fd == -1) {
+        if (errno == EACCES) {
+            *batCheckEnabled = false;
+        }
         PLOG_W("Couldn't open() '%s' file in R/O mode", sysBat);
         return false;
     }
@@ -206,6 +209,7 @@ int main(int argc, char **argv)
     setupSignalsPostThr();
 
     setupTimer();
+    bool batCheckEnabled = true;
     for (;;) {
         if (hfuzz.useScreen) {
             display_display(&hfuzz);
@@ -217,7 +221,7 @@ int main(int argc, char **argv)
             break;
         }
 #if defined(__ANDROID__)
-        if (checkBatteryCapacity()) {
+        if (batCheckEnabled && checkBatteryCapacity(&batCheckEnabled)) {
             break;
         }
 #endif
