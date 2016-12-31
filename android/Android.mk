@@ -160,8 +160,6 @@ LOCAL_CFLAGS := $(COMMON_CFLAGS)
 LOCAL_LDFLAGS := -lm -latomic
 
 ifeq ($(ANDROID_WITH_PTRACE),true)
-  LOCAL_C_INCLUDES := third_party/android/libunwind/include \
-                      third_party/android/capstone/include
   LOCAL_STATIC_LIBRARIES += libunwind-arch \
                             libunwind \
                             libunwind-ptrace \
