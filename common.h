@@ -26,6 +26,7 @@
 
 #include <limits.h>
 #include <pthread.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <sys/param.h>
@@ -285,6 +286,7 @@ typedef struct {
         char **symsWl;
         size_t symsWlCnt;
         bool saveMaps;
+        uintptr_t cloneFlags;
     } linux;
 } honggfuzz_t;
 
