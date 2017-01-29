@@ -88,7 +88,6 @@ static bool fuzz_prepareFileDynamically(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
     memcpy(fuzzer->dynamicFile, dynfile->data, dynfile->size);
     fuzzer->dynamicFileSz = dynfile->size;
 
-    mangle_Resize(hfuzz, fuzzer->dynamicFile, &fuzzer->dynamicFileSz);
     mangle_mangleContent(hfuzz, fuzzer);
 
     if (hfuzz->persistent == false && files_writeBufToFile
@@ -114,7 +113,6 @@ static bool fuzz_prepareFile(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, int rnd_ind
 
     /* If flip rate is 0.0, early abort file mangling */
     if (fuzzer->flipRate != 0.0L) {
-        mangle_Resize(hfuzz, fuzzer->dynamicFile, &fuzzer->dynamicFileSz);
         mangle_mangleContent(hfuzz, fuzzer);
     }
 
@@ -450,6 +448,7 @@ static void fuzz_fuzzLoop(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
     fuzzer->report[0] = '\0';
     fuzzer->mainWorker = true;
     fuzzer->origFileName = "DYNAMIC";
+    fuzzer->fileName[0] = '\0';
     fuzzer->flipRate = hfuzz->origFlipRate;
     fuzzer->dynamicFileSz = 0;
 
@@ -491,7 +490,9 @@ static void fuzz_fuzzLoop(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
         fuzzer->origFileName = files_basename(files_getFileFromFileq(hfuzz, rnd_index)->path);
     }
 
-    fuzz_getFileName(hfuzz, fuzzer->fileName);
+    if (hfuzz->persistent == false) {
+        fuzz_getFileName(hfuzz, fuzzer->fileName);
+    }
 
     if (state == _HF_STATE_DYNAMIC_PRE) {
         fuzzer->flipRate = 0.0f;
@@ -558,7 +559,7 @@ static void *fuzz_threadNew(void *arg)
     fuzzer_t fuzzer = {
         .pid = 0,
         .persistentPid = 0,
-        .dynamicFile = util_Malloc(hfuzz->maxFileSz),
+        .dynamicFile = util_Calloc(hfuzz->maxFileSz),
         .fuzzNo = fuzzNo,
         .persistentSock = -1,
         .tmOutSignaled = false,
