@@ -18,8 +18,8 @@
 #include "../util.h"
 
 static feedback_t bbMapFb;
-static feedback_t *feedback = &bbMapFb;
-static uint32_t my_thread_no = 0;
+feedback_t *feedback = &bbMapFb;
+uint32_t my_thread_no = 0;
 
 __attribute__ ((constructor))
 static void mapBB(void)
@@ -141,13 +141,15 @@ void __sanitizer_cov_trace_cmp8(uint64_t Arg1, uint64_t Arg2)
 
 /*
  * Cases[0] is number of comparison entries
- * Cases[1] is length of Val in bytes
+ * Cases[1] is length of Val in bits
  */
 void __sanitizer_cov_trace_switch(uint64_t Val, uint64_t * Cases)
 {
     for (uint64_t i = 0; i < Cases[0]; i++) {
-        uintptr_t pos = ((uintptr_t) __builtin_return_address(0) + i) % _HF_PERF_BITMAP_SIZE_16M;
-        uint8_t v = ((8 * Cases[1]) - __builtin_popcountll(Val ^ Cases[i + 2]));
+        uintptr_t pos =
+            (((uintptr_t) __builtin_return_address(0) + i) +
+             (_HF_PERF_BITMAP_SIZE_16M / 2)) % _HF_PERF_BITMAP_SIZE_16M;
+        uint8_t v = (uint8_t) Cases[1] - __builtin_popcountll(Val ^ Cases[i + 2]);
         uint8_t prev = ATOMIC_GET(feedback->bbMapCmp[pos]);
         if (prev < v) {
             ATOMIC_SET(feedback->bbMapCmp[pos], v);
@@ -172,7 +174,8 @@ void __sanitizer_cov_trace_pc_guard_init(uint32_t * start, uint32_t * stop)
             fprintf(stderr, "This process has too many PC guards\n");
             exit(1);
         }
-        *x = n;
+        /* If the corresponding PC was already hit, map this specific guard as non-interesting (0) */
+        *x = ATOMIC_GET(feedback->pcGuardMap[n]) ? 0U : n;
     }
 }
 
@@ -183,15 +186,4 @@ void __sanitizer_cov_trace_pc_guard(uint32_t * guard)
         ATOMIC_PRE_INC_RELAXED(feedback->pidFeedbackPc[my_thread_no]);
     }
     *guard = 0U;
-}
-
-void libhfuzz_instrumentUpdateCmpMap(void *addr, unsigned int new)
-{
-    uintptr_t pos = (uintptr_t) addr % _HF_PERF_BITMAP_SIZE_16M;
-    uint8_t v = new > 254 ? 254 : new;
-    uint8_t prev = ATOMIC_GET(feedback->bbMapCmp[pos]);
-    if (prev < v) {
-        ATOMIC_SET(feedback->bbMapCmp[pos], v);
-        ATOMIC_POST_ADD(feedback->pidFeedbackCmp[my_thread_no], v - prev);
-    }
 }
