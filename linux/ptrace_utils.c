@@ -266,10 +266,12 @@ static struct {
     [SIGBUS].important = true,
     [SIGBUS].descr = "SIGBUS",
 
+    /* Is affected from monitorSIGABRT flag */
     [SIGABRT].important = false,
     [SIGABRT].descr = "SIGABRT",
 
-    [SIGVTALRM].important = true,
+    /* Is affected from tmout_vtalrm flag */
+    [SIGVTALRM].important = false,
     [SIGVTALRM].descr = "SIGVTALRM-TMOUT",
 };
 /*  *INDENT-ON* */
@@ -903,7 +905,7 @@ static int arch_parseAsanReport(honggfuzz_t * hfuzz, pid_t pid, funcs_t * funcs,
                 ++pLineLC;
             }
 
-            /* Separator for crash thread stack trace is an empty line (after trmming \n */
+            /* End separator for crash thread stack trace is an empty line */
             if ((*pLineLC == '\0') && (frameIdx != 0)) {
                 break;
             }
@@ -981,9 +983,6 @@ static void arch_ptraceExitSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * f
         return;
     }
 
-    /* Local copy since flag is overridden for some crashes */
-    bool saveUnique = hfuzz->saveUnique;
-
     /* Increase global crashes counter */
     ATOMIC_POST_INC(hfuzz->crashesCnt);
     ATOMIC_POST_AND(hfuzz->dynFileIterExpire, _HF_DYNFILE_SUB_MASK);
@@ -1032,39 +1031,13 @@ static void arch_ptraceExitSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * f
     pc = (uintptr_t) funcs[0].pc;
 
     /*
-     * Check if backtrace contains whitelisted symbol. Whitelist overrides
-     * both stackhash and symbol blacklist. Crash is always kept regardless
-     * of the status of uniqueness flag.
+     * Check if stackhash is blacklisted
      */
-    if (hfuzz->linux.symsWl) {
-        char *wlSymbol = arch_btContainsSymbol(hfuzz->linux.symsWlCnt,
-                                               hfuzz->linux.symsWl, funcCnt, funcs);
-        if (wlSymbol != NULL) {
-            saveUnique = false;
-            LOG_D("Whitelisted symbol '%s' found, skipping blacklist checks", wlSymbol);
-        }
-    } else {
-        /*
-         * Check if stackhash is blacklisted
-         */
-        if (hfuzz->blacklist
-            && (fastArray64Search(hfuzz->blacklist, hfuzz->blacklistCnt, fuzzer->backtrace) !=
-                -1)) {
-            LOG_I("Blacklisted stack hash '%" PRIx64 "', skipping", fuzzer->backtrace);
-            ATOMIC_POST_INC(hfuzz->blCrashesCnt);
-            return;
-        }
-
-        /*
-         * Check if backtrace contains blacklisted symbol
-         */
-        char *blSymbol = arch_btContainsSymbol(hfuzz->linux.symsBlCnt,
-                                               hfuzz->linux.symsBl, funcCnt, funcs);
-        if (blSymbol != NULL) {
-            LOG_I("Blacklisted symbol '%s' found, skipping", blSymbol);
-            ATOMIC_POST_INC(hfuzz->blCrashesCnt);
-            return;
-        }
+    if (hfuzz->blacklist
+        && (fastArray64Search(hfuzz->blacklist, hfuzz->blacklistCnt, fuzzer->backtrace) != -1)) {
+        LOG_I("Blacklisted stack hash '%" PRIx64 "', skipping", fuzzer->backtrace);
+        ATOMIC_POST_INC(hfuzz->blCrashesCnt);
+        return;
     }
 
     /* If dry run mode, copy file with same name into workspace */
@@ -1073,7 +1046,7 @@ static void arch_ptraceExitSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * f
                  hfuzz->workDir, fuzzer->origFileName);
     } else {
         /* Keep the crashes file name format identical */
-        if (fuzzer->backtrace != 0ULL && saveUnique) {
+        if (fuzzer->backtrace != 0ULL && hfuzz->saveUnique) {
             snprintf(fuzzer->crashFileName, sizeof(fuzzer->crashFileName),
                      "%s/%s.PC.%" REG_PM ".STACK.%" PRIx64 ".CODE.%s.ADDR.%p.INSTR.%s.%s",
                      hfuzz->workDir, "SAN", pc, fuzzer->backtrace,
@@ -1116,7 +1089,7 @@ static void arch_ptraceExitSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * f
 
     /* Generate report */
     fuzzer->report[0] = '\0';
-    util_ssnprintf(fuzzer->report, sizeof(fuzzer->report), "TYPE: sanitizer exit code crash\n");
+    util_ssnprintf(fuzzer->report, sizeof(fuzzer->report), "EXIT_CODE: %s\n", HF_SAN_EXIT_CODE);
     util_ssnprintf(fuzzer->report, sizeof(fuzzer->report), "ORIG_FNAME: %s\n",
                    fuzzer->origFileName);
     util_ssnprintf(fuzzer->report, sizeof(fuzzer->report), "FUZZ_FNAME: %s\n",
@@ -1226,8 +1199,7 @@ void arch_ptraceAnalyze(honggfuzz_t * hfuzz, int status, pid_t pid, fuzzer_t * f
         /*
          * If it's an interesting signal, save the testcase
          */
-        if (arch_sigs[WSTOPSIG(status)].important
-            || (WSTOPSIG(status) == SIGABRT && hfuzz->monitorSIGABRT == true)) {
+        if (arch_sigs[WSTOPSIG(status)].important) {
             /*
              * If fuzzer worker is from core fuzzing process run full
              * analysis. Otherwise just unwind and get stack hash signature.
@@ -1400,4 +1372,13 @@ void arch_ptraceDetach(pid_t pid)
         arch_ptraceWaitForPidStop(tasks[i]);
         ptrace(PTRACE_DETACH, tasks[i], NULL, NULL);
     }
+}
+
+void arch_ptraceSignalsInit(honggfuzz_t * hfuzz)
+{
+    /* Default is true for all platforms except Android */
+    arch_sigs[SIGABRT].important = hfuzz->monitorSIGABRT;
+
+    /* Default is false */
+    arch_sigs[SIGVTALRM].important = hfuzz->tmout_vtalrm;
 }

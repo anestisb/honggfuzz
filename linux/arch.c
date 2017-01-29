@@ -375,10 +375,7 @@ void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
                     ("Un-handled ASan report due to compiler-rt internal error - retry with '%s' (%s)",
                      crashReport, fuzzer->fileName);
 
-                /*
-                 * Manually set the exitcode to ASan to trigger report parsing  since it's
-                 * the only report format supported yet
-                 */
+                /* Try to parse report file */
                 arch_ptraceExitAnalyze(hfuzz, ptracePid, fuzzer);
             }
         }
@@ -491,11 +488,15 @@ bool arch_archInit(honggfuzz_t * hfuzz)
         hfuzz->linux.pidCmd[sz] = '\0';
     }
 
+    /* Updates the important signal array based on input args */
+    arch_ptraceSignalsInit(hfuzz);
+
     /*
-     * If sanitizer fuzzing enabled increase number of major frames, since top 5-7 frames
-     * will be occupied with sanitizer symbols if 'abort_on_error' flag is set
+     * If sanitizer fuzzing enabled and SIGABRT is monitored (abort_on_error=1),
+     * increase number of major frames, since top 7-9 frames will be occupied
+     * with sanitizer runtime library & libc symbols
      */
-    if (hfuzz->monitorSIGABRT) {
+    if (hfuzz->enableSanitizers && hfuzz->monitorSIGABRT) {
         hfuzz->linux.numMajorFrames = 14;
     }
 
