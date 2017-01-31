@@ -209,7 +209,9 @@ int main(int argc, char **argv)
     setupSignalsPostThr();
 
     setupTimer();
+#if defined(__ANDROID__)
     bool batCheckEnabled = true;
+#endif
     for (;;) {
         if (hfuzz.useScreen) {
             display_display(&hfuzz);
