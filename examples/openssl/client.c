@@ -1,6 +1,11 @@
 /* Based on BoringSSL's client.c fuzzer */
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <assert.h>
+#include <openssl/err.h>
 #include <openssl/rand.h>
 #include <openssl/ssl.h>
 #include <stdint.h>
@@ -490,7 +495,7 @@ static void Init()
     OpenSSL_add_ssl_algorithms();
     RESET_RAND();
 
-    ctx = SSL_CTX_new(TLS_method());
+    ctx = SSL_CTX_new(SSLv23_method());
     const uint8_t *bufp = kRSAPrivateKeyDER;
     RSA *privkey = d2i_RSAPrivateKey(NULL, &bufp, sizeof(kRSAPrivateKeyDER));
     assert(privkey != NULL);
@@ -499,13 +504,14 @@ static void Init()
     int ret = SSL_CTX_use_PrivateKey(ctx, pkey);
     assert(ret == 1);
     EVP_PKEY_free(pkey);
+
     bufp = kCertificateDER;
     X509 *cert = d2i_X509(NULL, &bufp, sizeof(kCertificateDER));
     assert(cert != NULL);
     ret = SSL_CTX_use_certificate(ctx, cert);
     assert(ret == 1);
     X509_free(cert);
-    ret = SSL_CTX_set_cipher_list(ctx, "ALL:+NULL");
+    ret = SSL_CTX_set_cipher_list(ctx, "ALL:eNULL");
     assert(ret == 1);
 
     X509_STORE *store = X509_STORE_new();
@@ -547,6 +553,7 @@ int LLVMFuzzerTestOneInput(uint8_t * buf, size_t len)
     RESET_RAND();
 
     SSL *client = SSL_new(ctx);
+    SSL_set_tlsext_host_name(client, "localhost");
 
     BIO *in = BIO_new(BIO_s_mem());
     BIO_write(in, buf, len);
@@ -572,14 +579,20 @@ int LLVMFuzzerTestOneInput(uint8_t * buf, size_t len)
             if (SSL_write(client, tmp, r) <= 0) {
                 break;
             }
-            SSL_renegotiate(client);
 #ifndef OPENSSL_NO_HEARTBEATS
             SSL_heartbeat(client);
 #endif
+            SSL_renegotiate(client);
         }
+    } else {
+        ERR_print_errors_fp(stderr);
     }
 
     SSL_free(client);
 
     return 0;
 }
+
+#ifdef __cplusplus
+}
+#endif

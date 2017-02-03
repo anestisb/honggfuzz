@@ -52,9 +52,8 @@ static void display_put(const char *fmt, ...)
 {
     va_list args;
     va_start(args, fmt);
-    vfprintf(stdout, fmt, args);
+    vdprintf(logFd(), fmt, args);
     va_end(args);
-    fflush(stdout);
 }
 
 static void display_printKMG(uint64_t val)
@@ -237,8 +236,9 @@ static void display_displayLocked(honggfuzz_t * hfuzz)
         uint64_t softCntPc = ATOMIC_GET(hfuzz->linux.hwCnts.softCntPc);
         uint64_t softCntCmp = ATOMIC_GET(hfuzz->linux.hwCnts.softCntCmp);
         display_put("       *** blocks seen:    " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET
-                    ", comparison map: " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET "\n",
-                    softCntPc, softCntCmp);
+                    "\n", softCntPc);
+        display_put("       *** comparison map: " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET
+                    "\n", softCntCmp);
     }
 
     /* Sanitizer coverage specific counters */
@@ -261,5 +261,8 @@ static void display_displayLocked(honggfuzz_t * hfuzz)
 
 extern void display_display(honggfuzz_t * hfuzz)
 {
+    if (logIsTTY() == false) {
+        return;
+    }
     display_displayLocked(hfuzz);
 }
