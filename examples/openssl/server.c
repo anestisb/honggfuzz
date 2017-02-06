@@ -486,6 +486,7 @@ void RESET_RAND(void);
 unsigned int psk_callback(SSL * ssl, const char *identity, unsigned char *psk,
                           unsigned int max_psk_len)
 {
+    memset(psk, 'A', max_psk_len);
     return max_psk_len;
 }
 
@@ -540,9 +541,11 @@ static void Init()
     SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER | SSL_VERIFY_CLIENT_ONCE, NULL);
     SSL_CTX_set_verify_depth(ctx, 10);
 
+#if !defined(LIBRESSL_VERSION_NUMBER)
     SSL_CTX_set_psk_server_callback(ctx, psk_callback);
     ret = SSL_CTX_use_psk_identity_hint(ctx, "ABCDEFUZZ");
     assert(ret == 1);
+#endif /* !defined(LIBRESSL_VERSION_NUMBER) */
 }
 
 int LLVMFuzzerTestOneInput(uint8_t * buf, size_t len)
