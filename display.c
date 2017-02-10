@@ -36,11 +36,16 @@
 #include "log.h"
 #include "util.h"
 
-#define ESC_CLEAR "\033[H\033[2J"
+#define ESC_CLEAR_ALL "\033[2J"
+#define ESC_CLEAR_LINE "\033[2K"
+#define ESC_CLEAR_ABOVE "\033[1J"
+#define ESC_TERM_RESET "\033c"
 #define ESC_NAV(x,y) "\033["#x";"#y"H"
 #define ESC_BOLD "\033[1m"
 #define ESC_RED "\033[31m"
 #define ESC_RESET "\033[0m"
+#define ESC_SCROLL(x,y) "\033["#x";"#y"r"
+#define ESC_SCROLL_DISABLE "\033[?7h"
 
 #if defined(_HF_ARCH_LINUX)
 #define _HF_MONETARY_MOD "'"
@@ -98,6 +103,12 @@ static unsigned getCpuUse(long num_cpu)
 
 static void display_displayLocked(honggfuzz_t * hfuzz)
 {
+    static bool firstDisplay = true;
+    if (firstDisplay) {
+        display_put(ESC_CLEAR_ALL);
+        firstDisplay = false;
+    }
+
     unsigned long elapsed_second = (unsigned long)(time(NULL) - hfuzz->timeStart);
     unsigned int day, hour, min, second;
     char time_elapsed_str[64];
@@ -139,7 +150,7 @@ static void display_displayLocked(honggfuzz_t * hfuzz)
     /* The lock should be acquired before any output is printed on the screen */
     MX_SCOPED_LOCK(logMutexGet());
 
-    display_put("%s", ESC_CLEAR);
+    display_put(ESC_NAV(14, 1) ESC_CLEAR_ABOVE ESC_NAV(1, 1));
     display_put("----------------------------[ " ESC_BOLD "%s v%s" ESC_RESET
                 " ]---------------------------\n", PROG_NAME, PROG_VERSION);
     display_put("  Iterations : " ESC_BOLD "%" _HF_MONETARY_MOD "zu" ESC_RESET, curr_exec_cnt);
@@ -167,12 +178,15 @@ static void display_displayLocked(honggfuzz_t * hfuzz)
     util_getLocalTime("%F %T", start_time_str, sizeof(start_time_str), hfuzz->timeStart);
     display_put("\n    Run Time : " ESC_BOLD "%s" ESC_RESET " (since: " ESC_BOLD "%s" ESC_RESET
                 ")\n", time_elapsed_str, start_time_str);
-    display_put("   Input Dir : '" ESC_BOLD "%s" ESC_RESET "'\n",
-                hfuzz->inputDir != NULL ? hfuzz->inputDir : "[NONE]");
-    display_put("  Fuzzed Cmd : '" ESC_BOLD "%s" ESC_RESET "'\n", hfuzz->cmdline_txt);
+    display_put("   Input Dir : '" ESC_BOLD "%s" ESC_RESET "' (" ESC_BOLD "% " _HF_MONETARY_MOD "zu"
+                ESC_RESET ")\n", hfuzz->inputDir != NULL ? hfuzz->inputDir : "[NONE]",
+                hfuzz->fileCnt);
+
     if (hfuzz->linux.pid > 0) {
-        display_put("Remote cmd [" ESC_BOLD "%d" ESC_RESET "]: '" ESC_BOLD "%s" ESC_RESET
+        display_put("  Remote cmd : [" ESC_BOLD "%d" ESC_RESET "] '" ESC_BOLD "%s" ESC_RESET
                     "'\n", hfuzz->linux.pid, hfuzz->linux.pidCmd);
+    } else {
+        display_put("  Fuzzed Cmd : '" ESC_BOLD "%s" ESC_RESET "'\n", hfuzz->cmdline_txt);
     }
 
     static long num_cpu = 0;
@@ -187,11 +201,6 @@ static void display_displayLocked(honggfuzz_t * hfuzz)
     display_put("       Speed : " ESC_BOLD "% " _HF_MONETARY_MOD "zu" ESC_RESET "/sec"
                 " (avg: " ESC_BOLD "%" _HF_MONETARY_MOD "zu" ESC_RESET ")\n", exec_per_sec,
                 elapsed_second ? (curr_exec_cnt / elapsed_second) : 0);
-    /* If dry run, print also the input file count */
-    if (hfuzz->origFlipRate == 0.0L && hfuzz->useVerifier) {
-        display_put("     Input Files : '" ESC_BOLD "%" _HF_MONETARY_MOD "zu" ESC_RESET "'\n",
-                    hfuzz->fileCnt);
-    }
 
     uint64_t crashesCnt = ATOMIC_GET(hfuzz->crashesCnt);
     /* colored the crash count as red when exist crash */
@@ -208,37 +217,31 @@ static void display_displayLocked(honggfuzz_t * hfuzz)
         display_put(" Corpus Size : " ESC_BOLD "%" _HF_MONETARY_MOD "zu" ESC_RESET
                     ", max size (bytes): " ESC_BOLD "%" _HF_MONETARY_MOD "zu" ESC_RESET "\n",
                     hfuzz->dynfileqCnt, hfuzz->maxFileSz);
-        display_put("    Coverage :\n");
+        display_put("    Coverage :");
     }
 
     /* HW perf specific counters */
     if (hfuzz->dynFileMethod & _HF_DYNFILE_INSTR_COUNT) {
-        display_put("       *** instructions:   " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET
-                    "\n", ATOMIC_GET(hfuzz->linux.hwCnts.cpuInstrCnt));
+        display_put(" hwi: " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET,
+                    ATOMIC_GET(hfuzz->linux.hwCnts.cpuInstrCnt));
     }
     if (hfuzz->dynFileMethod & _HF_DYNFILE_BRANCH_COUNT) {
-        display_put("       *** branches:       " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET
-                    "\n", ATOMIC_GET(hfuzz->linux.hwCnts.cpuBranchCnt));
+        display_put(" hwb: " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET,
+                    ATOMIC_GET(hfuzz->linux.hwCnts.cpuBranchCnt));
     }
-    if (hfuzz->dynFileMethod & _HF_DYNFILE_BTS_BLOCK) {
-        display_put("       *** BTS blocks:     " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET
-                    "\n", ATOMIC_GET(hfuzz->linux.hwCnts.bbCnt));
-    }
-    if (hfuzz->dynFileMethod & _HF_DYNFILE_BTS_EDGE) {
-        display_put("       *** BTS edges:      " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET
-                    "\n", ATOMIC_GET(hfuzz->linux.hwCnts.bbCnt));
+    if (hfuzz->dynFileMethod & (_HF_DYNFILE_BTS_BLOCK | _HF_DYNFILE_BTS_EDGE)) {
+        display_put(" bts: " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET,
+                    ATOMIC_GET(hfuzz->linux.hwCnts.bbCnt));
     }
     if (hfuzz->dynFileMethod & _HF_DYNFILE_IPT_BLOCK) {
-        display_put("       *** PT blocks:      " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET
-                    "\n", ATOMIC_GET(hfuzz->linux.hwCnts.bbCnt));
+        display_put(" ipt: " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET,
+                    ATOMIC_GET(hfuzz->linux.hwCnts.bbCnt));
     }
     if (hfuzz->dynFileMethod & _HF_DYNFILE_SOFT) {
         uint64_t softCntPc = ATOMIC_GET(hfuzz->linux.hwCnts.softCntPc);
         uint64_t softCntCmp = ATOMIC_GET(hfuzz->linux.hwCnts.softCntCmp);
-        display_put("       *** blocks seen:    " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET
-                    "\n", softCntPc);
-        display_put("       *** comparison map: " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET
-                    "\n", softCntCmp);
+        display_put(" bb: " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET, softCntPc);
+        display_put(" cmp: " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET, softCntCmp);
     }
 
     /* Sanitizer coverage specific counters */
@@ -246,17 +249,18 @@ static void display_displayLocked(honggfuzz_t * hfuzz)
         uint64_t hitBB = ATOMIC_GET(hfuzz->sanCovCnts.hitBBCnt);
         uint64_t totalBB = ATOMIC_GET(hfuzz->sanCovCnts.totalBBCnt);
         float covPer = totalBB ? (((float)hitBB * 100) / totalBB) : 0.0;
-        display_put("       *** total hit #bb:  " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET
-                    " (coverage " ESC_BOLD "%.2f" ESC_RESET "%%)\n", hitBB, covPer);
-        display_put("       *** total #dso:     " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET
-                    " (instrumented only)\n", ATOMIC_GET(hfuzz->sanCovCnts.iDsoCnt));
-        display_put("       *** discovered #bb: " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET
-                    " (new from input seed)\n", ATOMIC_GET(hfuzz->sanCovCnts.newBBCnt));
-        display_put("       *** crashes:        " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET
-                    "\n", ATOMIC_GET(hfuzz->sanCovCnts.crashesCnt));
+        display_put(" (sancov) #bb:  " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET " (cov: "
+                    ESC_BOLD "%.2f" ESC_RESET "%%)", hitBB, covPer);
+        display_put(" #dso: " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET,
+                    ATOMIC_GET(hfuzz->sanCovCnts.iDsoCnt));
+        display_put(" #newbb: " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET,
+                    ATOMIC_GET(hfuzz->sanCovCnts.newBBCnt));
+        display_put(" #crashes: " ESC_BOLD "%" _HF_MONETARY_MOD PRIu64 ESC_RESET,
+                    ATOMIC_GET(hfuzz->sanCovCnts.crashesCnt));
     }
-    display_put("-----------------------------------[ " ESC_BOLD "LOGS" ESC_RESET
+    display_put("\n-----------------------------------[ " ESC_BOLD "LOGS" ESC_RESET
                 " ]-----------------------------------\n");
+    display_put(ESC_SCROLL(14, 999) ESC_NAV(999, 1));
 }
 
 extern void display_display(honggfuzz_t * hfuzz)
@@ -265,4 +269,14 @@ extern void display_display(honggfuzz_t * hfuzz)
         return;
     }
     display_displayLocked(hfuzz);
+}
+
+extern void display_init(void)
+{
+    display_put(ESC_NAV(999, 1));
+}
+
+extern void display_fini(void)
+{
+    display_put(ESC_SCROLL(1, 999) ESC_NAV(999, 1));
 }
