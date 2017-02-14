@@ -17,7 +17,7 @@ A security oriented, feedback-driven, evolutionary, easy-to-use fuzzer with inte
 **Requirements**
 
   * **Linux** - The BFD library (libbfd-dev) and libunwind (libunwind-dev/libunwind8-dev)
-  * **FreeBSD** - gmake
+  * **FreeBSD** - gmake, clang-3.6 or newer
   * **Android** - Android SDK/NDK. Also see [this detailed doc](docs/Android.md) on how to build and run it
   * **Windows** - CygWin
   * **Darwin/OS X** - Xcode 10.8+
