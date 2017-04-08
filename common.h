@@ -24,6 +24,7 @@
 #ifndef _HF_COMMON_H_
 #define _HF_COMMON_H_
 
+#include <dirent.h>
 #include <limits.h>
 #include <pthread.h>
 #include <inttypes.h>
@@ -39,7 +40,7 @@
 #endif
 
 #define PROG_NAME "honggfuzz"
-#define PROG_VERSION "0.9alpha"
+#define PROG_VERSION "1.0alpha"
 #define PROG_AUTHORS "Robert Swiecki <swiecki@google.com> et al.,\nCopyright 2010-2015 by Google Inc. All Rights Reserved."
 
 /* Go-style defer implementation */
@@ -184,11 +185,6 @@ struct strings_t {
      TAILQ_ENTRY(strings_t) pointers;
 };
 
-struct paths_t {
-    char path[PATH_MAX];
-     TAILQ_ENTRY(paths_t) pointers;
-};
-
 /* Maximum number of active fuzzing threads */
 #define _HF_THREAD_MAX 1024U
 typedef struct {
@@ -203,6 +199,9 @@ typedef struct {
     char **cmdline;
     char cmdline_txt[61];
     char *inputDir;
+    DIR *inputDirP;
+    size_t fileCnt;
+    bool fileCntDone;
     bool nullifyStdio;
     bool fuzzStdin;
     bool saveUnique;
@@ -225,29 +224,32 @@ typedef struct {
     size_t maxFileSz;
     char *reportFile;
     uint64_t asLimit;
-     TAILQ_HEAD(, paths_t) fileq;
-    size_t fileCnt;
-    size_t lastFileIndex;
-    size_t doneFileIndex;
     bool clearEnv;
     char *envs[128];
     bool persistent;
     bool tmout_vtalrm;
+    bool skipFeedbackOnTimeout;
     bool enableSanitizers;
     bool monitorSIGABRT;
     uint32_t threadsActiveCnt;
     pid_t mainPid;
+    bool terminating;
 
     const char *dictionaryFile;
-     TAILQ_HEAD(, strings_t) dictq;
+     TAILQ_HEAD(strq_t, strings_t) dictq;
     size_t dictionaryCnt;
+    struct strings_t *dictqCurrent;
 
     fuzzState_t state;
     feedback_t *feedback;
     int bbFd;
+
     size_t dynfileqCnt;
     pthread_mutex_t dynfileq_mutex;
-     TAILQ_HEAD(, dynfile_t) dynfileq;
+     TAILQ_HEAD(dictq_t, dynfile_t) dynfileq;
+    struct dynfile_t *dynfileqCurrent;
+
+    pthread_mutex_t feedback_mutex;
 
     size_t mutationsCnt;
     size_t crashesCnt;
@@ -285,12 +287,14 @@ typedef struct {
         size_t symsWlCnt;
         bool saveMaps;
         uintptr_t cloneFlags;
+        bool kernelOnly;
     } linux;
 } honggfuzz_t;
 
 typedef struct {
     pid_t pid;
     pid_t persistentPid;
+    fuzzState_t state;
     int64_t timeStartedMillis;
     const char *origFileName;
     char fileName[PATH_MAX];

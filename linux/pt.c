@@ -209,10 +209,13 @@ void arch_ptAnalyze(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 {
     struct perf_event_mmap_page *pem = (struct perf_event_mmap_page *)fuzzer->linux.perfMmapBuf;
 
+    uint64_t aux_tail = ATOMIC_GET(pem->aux_tail);
+    uint64_t aux_head = ATOMIC_GET(pem->aux_head);
+
     struct pt_config ptc;
     pt_config_init(&ptc);
-    ptc.begin = &fuzzer->linux.perfMmapAux[pem->aux_tail];
-    ptc.end = &fuzzer->linux.perfMmapAux[pem->aux_head - 1];
+    ptc.begin = &fuzzer->linux.perfMmapAux[aux_tail];
+    ptc.end = &fuzzer->linux.perfMmapAux[aux_head - 1];
 
     int errcode = pt_cpu_errata(&ptc.errata, &ptc.cpu);
     if (errcode < 0) {
