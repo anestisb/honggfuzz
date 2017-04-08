@@ -78,13 +78,12 @@ static bool fuzz_prepareFileDynamically(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
                   "coverage and/or CPU counters");
         }
 
-        size_t i = 0U;
-        size_t dynFilePos = util_rndGet(0, hfuzz->dynfileqCnt - 1);
-        TAILQ_FOREACH(dynfile, &hfuzz->dynfileq, pointers) {
-            if (i++ == dynFilePos) {
-                break;
-            }
+        if (hfuzz->dynfileqCurrent == NULL
+            || hfuzz->dynfileqCurrent == TAILQ_LAST(&hfuzz->dynfileq, dictq_t)) {
+            hfuzz->dynfileqCurrent = TAILQ_FIRST(&hfuzz->dynfileq);
         }
+        dynfile = hfuzz->dynfileqCurrent;
+        hfuzz->dynfileqCurrent = TAILQ_NEXT(hfuzz->dynfileqCurrent, pointers);
     }
 
     memcpy(fuzzer->dynamicFile, dynfile->data, dynfile->size);
@@ -102,22 +101,22 @@ static bool fuzz_prepareFileDynamically(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
     return true;
 }
 
-static bool fuzz_prepareFile(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, int rnd_index)
+static bool fuzz_prepareFile(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, bool rewind)
 {
-    struct paths_t *file = files_getFileFromFileq(hfuzz, rnd_index);
-    fuzzer->origFileName = files_basename(file->path);
+    char fname[PATH_MAX];
+    if (files_getNext(hfuzz, fname, rewind) == false) {
+        return false;
+    }
+    fuzzer->origFileName = files_basename(fname);
 
-    ssize_t fileSz = files_readFileToBufMax(file->path, fuzzer->dynamicFile, hfuzz->maxFileSz);
+    ssize_t fileSz = files_readFileToBufMax(fname, fuzzer->dynamicFile, hfuzz->maxFileSz);
     if (fileSz < 0) {
-        LOG_E("Couldn't read contents of '%s'", file->path);
+        LOG_E("Couldn't read contents of '%s'", fname);
         return false;
     }
     fuzzer->dynamicFileSz = fileSz;
 
-    /* If flip rate is 0.0, early abort file mangling */
-    if (fuzzer->flipRate != 0.0L) {
-        mangle_mangleContent(hfuzz, fuzzer);
-    }
+    mangle_mangleContent(hfuzz, fuzzer);
 
     if (hfuzz->persistent == false && files_writeBufToFile
         (fuzzer->fileName, fuzzer->dynamicFile, fuzzer->dynamicFileSz,
@@ -186,6 +185,47 @@ static bool fuzz_postProcessFile(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
     return true;
 }
 
+static fuzzState_t fuzz_getState(honggfuzz_t * hfuzz)
+{
+    return ATOMIC_GET(hfuzz->state);
+}
+
+static void fuzz_setState(honggfuzz_t * hfuzz, fuzzState_t state)
+{
+    /* All threads must indicate willingness to switch to _HF_STATE_DYNAMIC_MAIN */
+    if (state == _HF_STATE_DYNAMIC_MAIN) {
+        static size_t cnt = 0;
+        ATOMIC_PRE_INC(cnt);
+        while (ATOMIC_GET(cnt) < hfuzz->threadsMax) {
+            sleep(1);
+        }
+    }
+
+    static pthread_mutex_t state_mutex = PTHREAD_MUTEX_INITIALIZER;
+    MX_SCOPED_LOCK(&state_mutex);
+
+    if (hfuzz->state == state) {
+        return;
+    }
+
+    switch (state) {
+    case _HF_STATE_DYNAMIC_PRE:
+        LOG_I("Entering phase 1/2: Dry Run");
+        break;
+    case _HF_STATE_DYNAMIC_MAIN:
+        LOG_I("Entering phase 2/2: Main");
+        break;
+    case _HF_STATE_STATIC:
+        LOG_I("Entering phase: Static");
+        break;
+    default:
+        LOG_I("Entering unknown phase: %d", state);
+        break;
+    }
+
+    ATOMIC_SET(hfuzz->state, state);
+}
+
 static bool fuzz_runVerifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
 {
     int crashFd = -1;
@@ -207,6 +247,7 @@ static bool fuzz_runVerifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
         fuzzer_t vFuzzer = {
             .pid = 0,
             .persistentPid = 0,
+            .state = fuzz_getState(hfuzz),
             .timeStartedMillis = util_timeNowMillis(),
             .crashFileName = {0},
             .pc = 0ULL,
@@ -238,8 +279,6 @@ static bool fuzz_runVerifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
                                  .softCntPc = 0ULL,
                                  .softCntCmp = 0ULL,
                                  },
-                      .perfMmapBuf = NULL,
-                      .perfMmapAux = NULL,
                       .attachedPid = 0,
                       },
         };
@@ -292,49 +331,29 @@ static bool fuzz_runVerifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
     return true;
 }
 
-static fuzzState_t fuzz_getState(honggfuzz_t * hfuzz)
-{
-    return ATOMIC_GET(hfuzz->state);
-}
-
-static void fuzz_setState(honggfuzz_t * hfuzz, fuzzState_t state)
-{
-    switch (state) {
-    case _HF_STATE_DYNAMIC_PRE:
-        LOG_I("Entering phase 1/2: Dry Run");
-        break;
-    case _HF_STATE_DYNAMIC_MAIN:
-        LOG_I("Entering phase 2/2: Main");
-        break;
-    case _HF_STATE_STATIC:
-        LOG_I("Entering phase: Static");
-        break;
-    default:
-        LOG_I("Entering unknown phase: %d", state);
-        break;
-    }
-    ATOMIC_SET(hfuzz->state, state);
-}
-
-static void fuzz_addFileToFileQLocked(honggfuzz_t * hfuzz, uint8_t * data, size_t size)
+static void fuzz_addFileToFileQ(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 {
     struct dynfile_t *dynfile = (struct dynfile_t *)util_Malloc(sizeof(struct dynfile_t));
-    dynfile->size = size;
-    dynfile->data = (uint8_t *) util_Malloc(size);
-    memcpy(dynfile->data, data, size);
+    dynfile->size = fuzzer->dynamicFileSz;
+    dynfile->data = (uint8_t *) util_Malloc(fuzzer->dynamicFileSz);
+    memcpy(dynfile->data, fuzzer->dynamicFile, fuzzer->dynamicFileSz);
+
+    MX_SCOPED_LOCK(&hfuzz->dynfileq_mutex);
     TAILQ_INSERT_TAIL(&hfuzz->dynfileq, dynfile, pointers);
     hfuzz->dynfileqCnt++;
 
     /* No need to add new coverage if we are supposed to append new coverage-inducing inputs only */
-    if (fuzz_getState(hfuzz) == _HF_STATE_DYNAMIC_PRE && hfuzz->covDir == NULL) {
+    if (fuzzer->state == _HF_STATE_DYNAMIC_PRE && hfuzz->covDir == NULL) {
         LOG_D("New coverage found, but we're in the initial coverage assessment state. Skipping");
         return;
     }
 
     char fname[PATH_MAX];
-    uint64_t crc64 = util_CRC64(data, size);
-    snprintf(fname, sizeof(fname), "%s/%016" PRIx64 ".%08" PRIx32 ".honggfuzz.cov",
-             hfuzz->covDir ? hfuzz->covDir : hfuzz->inputDir, crc64, (uint32_t) size);
+    uint64_t crc64f = util_CRC64(fuzzer->dynamicFile, fuzzer->dynamicFileSz);
+    uint64_t crc64r = util_CRC64Rev(fuzzer->dynamicFile, fuzzer->dynamicFileSz);
+    snprintf(fname, sizeof(fname), "%s/%016" PRIx64 "%016" PRIx64 ".%08" PRIx32 ".honggfuzz.cov",
+             hfuzz->covDir ? hfuzz->covDir : hfuzz->inputDir, crc64f, crc64r,
+             (uint32_t) fuzzer->dynamicFileSz);
 
     if (access(fname, R_OK) == 0) {
         LOG_D("File '%s' already exists in the corpus directory", fname);
@@ -343,7 +362,9 @@ static void fuzz_addFileToFileQLocked(honggfuzz_t * hfuzz, uint8_t * data, size_
 
     LOG_D("Adding file '%s' to the corpus directory", fname);
 
-    if (files_writeBufToFile(fname, data, size, O_WRONLY | O_CREAT | O_EXCL | O_TRUNC | O_CLOEXEC)
+    if (files_writeBufToFile
+        (fname, fuzzer->dynamicFile, fuzzer->dynamicFileSz,
+         O_WRONLY | O_CREAT | O_EXCL | O_TRUNC | O_CLOEXEC)
         == false) {
         LOG_W("Couldn't write buffer to file '%s'", fname);
     }
@@ -351,13 +372,17 @@ static void fuzz_addFileToFileQLocked(honggfuzz_t * hfuzz, uint8_t * data, size_
 
 static void fuzz_perfFeedback(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 {
+    if (hfuzz->skipFeedbackOnTimeout && fuzzer->tmOutSignaled) {
+        return;
+    }
+
     LOG_D("New file size: %zu, Perf feedback new/cur (instr,branch): %" PRIu64 "/%" PRIu64 "/%"
           PRIu64 "/%" PRIu64 ", BBcnt new/total: %" PRIu64 "/%" PRIu64, fuzzer->dynamicFileSz,
           fuzzer->linux.hwCnts.cpuInstrCnt, hfuzz->linux.hwCnts.cpuInstrCnt,
           fuzzer->linux.hwCnts.cpuBranchCnt, hfuzz->linux.hwCnts.cpuBranchCnt,
           fuzzer->linux.hwCnts.newBBCnt, hfuzz->linux.hwCnts.bbCnt);
 
-    MX_SCOPED_LOCK(&hfuzz->dynfileq_mutex);
+    MX_SCOPED_LOCK(&hfuzz->feedback_mutex);
 
     uint64_t softCntPc = 0UL;
     uint64_t softCntCmp = 0UL;
@@ -388,21 +413,24 @@ static void fuzz_perfFeedback(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
         hfuzz->linux.hwCnts.softCntPc += softCntPc;
         hfuzz->linux.hwCnts.softCntCmp += softCntCmp;
 
-        LOG_I("New: Len:%zu, (i,b,s,cmp,hw): %" PRIu64 "/%"
-              PRIu64 "/%" PRIu64 "/%" PRIu64 "/%" PRIu64 ", Total: %" PRIu64
+        LOG_I("NEW, size:%zu (i,b,sw,hw,cmp): %" PRIu64 "/%"
+              PRIu64 "/%" PRIu64 "/%" PRIu64 "/%" PRIu64 ", Tot:%" PRIu64
               "/%" PRIu64 "/%" PRIu64 "/%" PRIu64 "/%" PRIu64, fuzzer->dynamicFileSz,
               fuzzer->linux.hwCnts.cpuInstrCnt, fuzzer->linux.hwCnts.cpuBranchCnt, softCntPc,
-              softCntCmp, fuzzer->linux.hwCnts.newBBCnt,
-              hfuzz->linux.hwCnts.cpuInstrCnt, hfuzz->linux.hwCnts.cpuBranchCnt,
-              hfuzz->linux.hwCnts.softCntPc, hfuzz->linux.hwCnts.softCntCmp,
-              hfuzz->linux.hwCnts.bbCnt);
+              fuzzer->linux.hwCnts.newBBCnt, softCntCmp, hfuzz->linux.hwCnts.cpuInstrCnt,
+              hfuzz->linux.hwCnts.cpuBranchCnt, hfuzz->linux.hwCnts.softCntPc,
+              hfuzz->linux.hwCnts.bbCnt, hfuzz->linux.hwCnts.softCntCmp);
 
-        fuzz_addFileToFileQLocked(hfuzz, fuzzer->dynamicFile, fuzzer->dynamicFileSz);
+        fuzz_addFileToFileQ(hfuzz, fuzzer);
     }
 }
 
 static void fuzz_sanCovFeedback(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 {
+    if (hfuzz->skipFeedbackOnTimeout && fuzzer->tmOutSignaled) {
+        return;
+    }
+
     LOG_D
         ("File size (Best/New): %zu, SanCov feedback (bb,dso): Best: [%" PRIu64
          ",%" PRIu64 "] / New: [%" PRIu64 ",%" PRIu64 "], newBBs:%" PRIu64,
@@ -410,7 +438,7 @@ static void fuzz_sanCovFeedback(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
          hfuzz->sanCovCnts.iDsoCnt, fuzzer->sanCovCnts.hitBBCnt, fuzzer->sanCovCnts.iDsoCnt,
          fuzzer->sanCovCnts.newBBCnt);
 
-    MX_SCOPED_LOCK(&hfuzz->dynfileq_mutex);
+    MX_SCOPED_LOCK(&hfuzz->feedback_mutex);
 
     int64_t diff0 = hfuzz->linux.hwCnts.cpuInstrCnt - fuzzer->linux.hwCnts.cpuInstrCnt;
     int64_t diff1 = hfuzz->linux.hwCnts.cpuBranchCnt - fuzzer->linux.hwCnts.cpuBranchCnt;
@@ -430,8 +458,8 @@ static void fuzz_sanCovFeedback(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
                    || hfuzz->sanCovCnts.iDsoCnt < fuzzer->sanCovCnts.iDsoCnt);
 
     if (newCov || (diff0 < 0 || diff1 < 0)) {
-        LOG_I("SanCov Update: file size (Cur): %zu, newBBs:%" PRIu64
-              ", counters (Cur,New): %" PRIu64 "/%" PRIu64 ",%" PRIu64 "/%" PRIu64,
+        LOG_I("SanCov Update: fsize:%zu, newBBs:%" PRIu64
+              ", (Cur,New): %" PRIu64 "/%" PRIu64 ",%" PRIu64 "/%" PRIu64,
               fuzzer->dynamicFileSz, fuzzer->sanCovCnts.newBBCnt,
               hfuzz->sanCovCnts.hitBBCnt, hfuzz->sanCovCnts.iDsoCnt, fuzzer->sanCovCnts.hitBBCnt,
               fuzzer->sanCovCnts.iDsoCnt);
@@ -450,7 +478,7 @@ static void fuzz_sanCovFeedback(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
         hfuzz->linux.hwCnts.cpuInstrCnt = fuzzer->linux.hwCnts.cpuInstrCnt;
         hfuzz->linux.hwCnts.cpuBranchCnt = fuzzer->linux.hwCnts.cpuBranchCnt;
 
-        fuzz_addFileToFileQLocked(hfuzz, fuzzer->dynamicFile, fuzzer->dynamicFileSz);
+        fuzz_addFileToFileQ(hfuzz, fuzzer);
     }
 }
 
@@ -458,6 +486,7 @@ static void fuzz_fuzzLoop(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 {
     fuzzer->pid = 0;
     fuzzer->timeStartedMillis = util_timeNowMillis();
+    fuzzer->state = fuzz_getState(hfuzz);
     fuzzer->crashFileName[0] = '\0';
     fuzzer->pc = 0ULL;
     fuzzer->backtrace = 0ULL;
@@ -466,7 +495,6 @@ static void fuzz_fuzzLoop(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
     fuzzer->report[0] = '\0';
     fuzzer->mainWorker = true;
     fuzzer->origFileName = "DYNAMIC";
-    fuzzer->fileName[0] = '\0';
     fuzzer->flipRate = hfuzz->origFlipRate;
     fuzzer->dynamicFileSz = 0;
 
@@ -480,57 +508,38 @@ static void fuzz_fuzzLoop(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
     fuzzer->linux.hwCnts.cpuBranchCnt = 0ULL;
     fuzzer->linux.hwCnts.bbCnt = 0ULL;
     fuzzer->linux.hwCnts.newBBCnt = 0ULL;
-    fuzzer->linux.perfMmapBuf = NULL;
-    fuzzer->linux.perfMmapAux = NULL;
-
-    size_t rnd_index = util_rndGet(0, hfuzz->fileCnt - 1);
-
-    /* If dry run mode, pick the next file and not a random one */
-    if (fuzzer->flipRate == 0.0L && hfuzz->useVerifier) {
-        rnd_index = ATOMIC_POST_INC(hfuzz->lastFileIndex);
-    }
-
-    if (fuzz_getState(hfuzz) == _HF_STATE_DYNAMIC_PRE) {
-        rnd_index = ATOMIC_POST_INC(hfuzz->lastFileIndex);
-        if (rnd_index >= hfuzz->fileCnt) {
-            /*
-             * The waiting logic (for the DYNAMIC_PRE phase to finish) should be based on cond-waits
-             * or mutexes, but it'd complicate code too much
-             */
-            while (fuzz_getState(hfuzz) == _HF_STATE_DYNAMIC_PRE) {
-                sleep(1);
-            }
-        }
-    }
-
-    fuzzState_t state = fuzz_getState(hfuzz);
 
     if (hfuzz->persistent == false) {
         fuzz_getFileName(hfuzz, fuzzer->fileName);
     }
 
-    if (state == _HF_STATE_DYNAMIC_PRE) {
+    if (fuzzer->state == _HF_STATE_DYNAMIC_PRE) {
         fuzzer->flipRate = 0.0f;
-        if (!fuzz_prepareFile(hfuzz, fuzzer, rnd_index)) {
-            LOG_F("fuzz_prepareFile() failed");
+        if (fuzz_prepareFile(hfuzz, fuzzer, false /* rewind */ ) == false) {
+            fuzz_setState(hfuzz, _HF_STATE_DYNAMIC_MAIN);
+            fuzzer->state = fuzz_getState(hfuzz);
         }
-    } else if (hfuzz->externalCommand) {
-        if (!fuzz_prepareFileExternally(hfuzz, fuzzer)) {
-            LOG_F("fuzz_prepareFileExternally() failed");
-        }
-    } else if (state == _HF_STATE_DYNAMIC_MAIN) {
+    }
+    if (fuzzer->state == _HF_STATE_DYNAMIC_MAIN) {
         if (!fuzz_prepareFileDynamically(hfuzz, fuzzer)) {
             LOG_F("fuzz_prepareFileDynamically() failed");
         }
-    } else {
-        if (!fuzz_prepareFile(hfuzz, fuzzer, rnd_index)) {
-            LOG_F("fuzz_prepareFile() failed");
-        }
     }
+    if (fuzzer->state == _HF_STATE_STATIC) {
+        if (hfuzz->externalCommand) {
+            if (!fuzz_prepareFileExternally(hfuzz, fuzzer)) {
+                LOG_F("fuzz_prepareFileExternally() failed");
+            }
+        } else {
+            if (!fuzz_prepareFile(hfuzz, fuzzer, true /* rewind */ )) {
+                LOG_F("fuzz_prepareFile() failed");
+            }
+        }
 
-    if (state == _HF_STATE_STATIC && hfuzz->postExternalCommand != NULL) {
-        if (!fuzz_postProcessFile(hfuzz, fuzzer)) {
-            LOG_F("fuzz_postProcessFile() failed");
+        if (hfuzz->postExternalCommand != NULL) {
+            if (!fuzz_postProcessFile(hfuzz, fuzzer)) {
+                LOG_F("fuzz_postProcessFile() failed");
+            }
         }
     }
 
@@ -556,11 +565,6 @@ static void fuzz_fuzzLoop(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
     }
 
     report_Report(hfuzz, fuzzer->report);
-
-    if (state == _HF_STATE_DYNAMIC_PRE && ATOMIC_PRE_INC(hfuzz->doneFileIndex) >= hfuzz->fileCnt) {
-        fuzz_setState(hfuzz, _HF_STATE_DYNAMIC_MAIN);
-        snprintf(fuzzer->fileName, sizeof(fuzzer->fileName), "[DYNAMIC]");
-    }
 }
 
 static void *fuzz_threadNew(void *arg)
@@ -576,6 +580,7 @@ static void *fuzz_threadNew(void *arg)
         .fuzzNo = fuzzNo,
         .persistentSock = -1,
         .tmOutSignaled = false,
+        .fileName = "[UNSET]",
 
         .linux.attachedPid = 0,
     };
@@ -606,28 +611,33 @@ static void *fuzz_threadNew(void *arg)
             return NULL;
         }
 
+        if (ATOMIC_GET(hfuzz->terminating) == true) {
+            return NULL;
+        }
+
         fuzz_fuzzLoop(hfuzz, &fuzzer);
     }
 }
 
-static void fuzz_runThread(honggfuzz_t * hfuzz, void *(*thread) (void *))
+static void fuzz_runThread(honggfuzz_t * hfuzz, pthread_t * thread, void *(*thread_func) (void *))
 {
     pthread_attr_t attr;
 
     pthread_attr_init(&attr);
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
     pthread_attr_setstacksize(&attr, _HF_PTHREAD_STACKSIZE);
     pthread_attr_setguardsize(&attr, (size_t) sysconf(_SC_PAGESIZE));
 
-    pthread_t t;
-    if (pthread_create(&t, &attr, thread, (void *)hfuzz) < 0) {
+    if (pthread_create(thread, &attr, thread_func, (void *)hfuzz) < 0) {
         PLOG_F("Couldn't create a new thread");
     }
+
+    pthread_attr_destroy(&attr);
 
     return;
 }
 
-void fuzz_threads(honggfuzz_t * hfuzz)
+void fuzz_threadsStart(honggfuzz_t * hfuzz, pthread_t * threads)
 {
     fuzz_mainThread = pthread_self();
 
@@ -648,6 +658,17 @@ void fuzz_threads(honggfuzz_t * hfuzz)
     }
 
     for (size_t i = 0; i < hfuzz->threadsMax; i++) {
-        fuzz_runThread(hfuzz, fuzz_threadNew);
+        fuzz_runThread(hfuzz, &threads[i], fuzz_threadNew);
     }
+}
+
+void fuzz_threadsStop(honggfuzz_t * hfuzz, pthread_t * threads)
+{
+    for (size_t i = 0; i < hfuzz->threadsMax; i++) {
+        void *retval;
+        if (pthread_join(threads[i], &retval) != 0) {
+            PLOG_F("Couldn't pthread_join() thread: %zu", i);
+        }
+    }
+    LOG_I("All threads done");
 }
