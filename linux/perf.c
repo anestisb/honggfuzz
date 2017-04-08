@@ -62,14 +62,16 @@ static inline void arch_perfBtsCount(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
         uint64_t misc;
     };
 
+    uint64_t aux_head = ATOMIC_GET(pem->aux_head);
     struct bts_branch *br = (struct bts_branch *)fuzzer->linux.perfMmapAux;
-    for (; br < ((struct bts_branch *)(fuzzer->linux.perfMmapAux + pem->aux_head)); br++) {
+    for (; br < ((struct bts_branch *)(fuzzer->linux.perfMmapAux + aux_head)); br++) {
         /*
          * Kernel sometimes reports branches from the kernel (iret), we are not interested in that as it
          * makes the whole concept of unique branch counting less predictable
          */
-        if (__builtin_expect(br->from > 0xFFFFFFFF00000000, false)
-            || __builtin_expect(br->to > 0xFFFFFFFF00000000, false)) {
+        if (hfuzz->linux.kernelOnly == false
+            && (__builtin_expect(br->from > 0xFFFFFFFF00000000, false)
+                || __builtin_expect(br->to > 0xFFFFFFFF00000000, false))) {
             LOG_D("Adding branch %#018" PRIx64 " - %#018" PRIx64, br->from, br->to);
             continue;
         }
@@ -117,8 +119,8 @@ static long perf_event_open(struct perf_event_attr *hw_event, pid_t pid, int cpu
                    (uintptr_t) group_fd, (uintptr_t) flags);
 }
 
-static bool arch_perfOpen(honggfuzz_t * hfuzz, fuzzer_t * fuzzer UNUSED, pid_t pid,
-                          dynFileMethod_t method, int *perfFd)
+static bool arch_perfCreate(honggfuzz_t * hfuzz, fuzzer_t * fuzzer UNUSED, pid_t pid,
+                            dynFileMethod_t method, int *perfFd)
 {
     LOG_D("Enabling PERF for PID=%d method=%x", pid, method);
 
@@ -138,16 +140,11 @@ static bool arch_perfOpen(honggfuzz_t * hfuzz, fuzzer_t * fuzzer UNUSED, pid_t p
     struct perf_event_attr pe;
     memset(&pe, 0, sizeof(struct perf_event_attr));
     pe.size = sizeof(struct perf_event_attr);
-    pe.exclude_kernel = 1;
-#if 0
-    pe.exclude_hv = 1;
-    pe.exclude_guest = 1;
-    pe.exclude_idle = 1;
-    pe.exclude_callchain_kernel = 1;
-    pe.exclude_callchain_user = 1;
-    pe.pinned = 1;
-    pe.precise_ip = 1;
-#endif
+    if (hfuzz->linux.kernelOnly) {
+        pe.exclude_user = 1;
+    } else {
+        pe.exclude_kernel = 1;
+    }
     if (hfuzz->linux.pid > 0 || hfuzz->persistent == true) {
         pe.disabled = 0;
         pe.enable_on_exec = 0;
@@ -215,7 +212,7 @@ static bool arch_perfOpen(honggfuzz_t * hfuzz, fuzzer_t * fuzzer UNUSED, pid_t p
     pem->aux_offset = pem->data_offset + pem->data_size;
     pem->aux_size = _HF_PERF_AUX_SZ;
     fuzzer->linux.perfMmapAux =
-        mmap(NULL, pem->aux_size, PROT_READ | PROT_WRITE, MAP_SHARED, *perfFd, pem->aux_offset);
+        mmap(NULL, pem->aux_size, PROT_READ, MAP_SHARED, *perfFd, pem->aux_offset);
 
     if (fuzzer->linux.perfMmapAux == MAP_FAILED) {
         munmap(fuzzer->linux.perfMmapBuf, _HF_PERF_MAP_SZ + getpagesize());
@@ -232,47 +229,44 @@ static bool arch_perfOpen(honggfuzz_t * hfuzz, fuzzer_t * fuzzer UNUSED, pid_t p
     return true;
 }
 
-bool arch_perfEnable(pid_t pid, honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
+bool arch_perfOpen(pid_t pid, honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 {
     if (hfuzz->dynFileMethod == _HF_DYNFILE_NONE) {
         return true;
     }
 
-    fuzzer->linux.cpuInstrFd = -1;
-    fuzzer->linux.cpuBranchFd = -1;
-    fuzzer->linux.cpuIptBtsFd = -1;
-
     if (hfuzz->dynFileMethod & _HF_DYNFILE_INSTR_COUNT) {
-        if (arch_perfOpen(hfuzz, fuzzer, pid, _HF_DYNFILE_INSTR_COUNT, &fuzzer->linux.cpuInstrFd) ==
-            false) {
+        if (arch_perfCreate(hfuzz, fuzzer, pid, _HF_DYNFILE_INSTR_COUNT, &fuzzer->linux.cpuInstrFd)
+            == false) {
             LOG_E("Cannot set up perf for PID=%d (_HF_DYNFILE_INSTR_COUNT)", pid);
             goto out;
         }
     }
     if (hfuzz->dynFileMethod & _HF_DYNFILE_BRANCH_COUNT) {
-        if (arch_perfOpen(hfuzz, fuzzer, pid, _HF_DYNFILE_BRANCH_COUNT, &fuzzer->linux.cpuBranchFd)
+        if (arch_perfCreate
+            (hfuzz, fuzzer, pid, _HF_DYNFILE_BRANCH_COUNT, &fuzzer->linux.cpuBranchFd)
             == false) {
             LOG_E("Cannot set up perf for PID=%d (_HF_DYNFILE_BRANCH_COUNT)", pid);
             goto out;
         }
     }
     if (hfuzz->dynFileMethod & _HF_DYNFILE_BTS_BLOCK) {
-        if (arch_perfOpen(hfuzz, fuzzer, pid, _HF_DYNFILE_BTS_BLOCK, &fuzzer->linux.cpuIptBtsFd) ==
-            false) {
+        if (arch_perfCreate(hfuzz, fuzzer, pid, _HF_DYNFILE_BTS_BLOCK, &fuzzer->linux.cpuIptBtsFd)
+            == false) {
             LOG_E("Cannot set up perf for PID=%d (_HF_DYNFILE_BTS_BLOCK)", pid);
             goto out;
         }
     }
     if (hfuzz->dynFileMethod & _HF_DYNFILE_BTS_EDGE) {
-        if (arch_perfOpen(hfuzz, fuzzer, pid, _HF_DYNFILE_BTS_EDGE, &fuzzer->linux.cpuIptBtsFd) ==
+        if (arch_perfCreate(hfuzz, fuzzer, pid, _HF_DYNFILE_BTS_EDGE, &fuzzer->linux.cpuIptBtsFd) ==
             false) {
             LOG_E("Cannot set up perf for PID=%d (_HF_DYNFILE_BTS_EDGE)", pid);
             goto out;
         }
     }
     if (hfuzz->dynFileMethod & _HF_DYNFILE_IPT_BLOCK) {
-        if (arch_perfOpen(hfuzz, fuzzer, pid, _HF_DYNFILE_IPT_BLOCK, &fuzzer->linux.cpuIptBtsFd) ==
-            false) {
+        if (arch_perfCreate(hfuzz, fuzzer, pid, _HF_DYNFILE_IPT_BLOCK, &fuzzer->linux.cpuIptBtsFd)
+            == false) {
             LOG_E("Cannot set up perf for PID=%d (_HF_DYNFILE_IPT_BLOCK)", pid);
             goto out;
         }
@@ -288,47 +282,10 @@ bool arch_perfEnable(pid_t pid, honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
     return false;
 }
 
-void arch_perfAnalyze(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
+void arch_perfClose(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 {
     if (hfuzz->dynFileMethod == _HF_DYNFILE_NONE) {
         return;
-    }
-
-    uint64_t instrCount = 0;
-    if (hfuzz->dynFileMethod & _HF_DYNFILE_INSTR_COUNT) {
-        ioctl(fuzzer->linux.cpuInstrFd, PERF_EVENT_IOC_DISABLE, 1);
-        if (read(fuzzer->linux.cpuInstrFd, &instrCount, sizeof(instrCount)) != sizeof(instrCount)) {
-            PLOG_E("read(perfFd='%d') failed", fuzzer->linux.cpuInstrFd);
-        }
-        close(fuzzer->linux.cpuInstrFd);
-    }
-
-    uint64_t branchCount = 0;
-    if (hfuzz->dynFileMethod & _HF_DYNFILE_BRANCH_COUNT) {
-        ioctl(fuzzer->linux.cpuBranchFd, PERF_EVENT_IOC_DISABLE, 1);
-        if (read(fuzzer->linux.cpuBranchFd, &branchCount, sizeof(branchCount)) !=
-            sizeof(branchCount)) {
-            PLOG_E("read(perfFd='%d') failed", fuzzer->linux.cpuBranchFd);
-        }
-        close(fuzzer->linux.cpuBranchFd);
-    }
-
-    if (hfuzz->dynFileMethod & _HF_DYNFILE_BTS_BLOCK) {
-        ioctl(fuzzer->linux.cpuIptBtsFd, PERF_EVENT_IOC_DISABLE, 1);
-        close(fuzzer->linux.cpuIptBtsFd);
-        arch_perfMmapParse(hfuzz, fuzzer);
-    }
-
-    if (hfuzz->dynFileMethod & _HF_DYNFILE_BTS_EDGE) {
-        ioctl(fuzzer->linux.cpuIptBtsFd, PERF_EVENT_IOC_DISABLE, 1);
-        close(fuzzer->linux.cpuIptBtsFd);
-        arch_perfMmapParse(hfuzz, fuzzer);
-    }
-
-    if (hfuzz->dynFileMethod & _HF_DYNFILE_IPT_BLOCK) {
-        ioctl(fuzzer->linux.cpuIptBtsFd, PERF_EVENT_IOC_DISABLE, 1);
-        close(fuzzer->linux.cpuIptBtsFd);
-        arch_perfMmapParse(hfuzz, fuzzer);
     }
 
     if (fuzzer->linux.perfMmapAux != NULL) {
@@ -338,6 +295,106 @@ void arch_perfAnalyze(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
     if (fuzzer->linux.perfMmapBuf != NULL) {
         munmap(fuzzer->linux.perfMmapBuf, _HF_PERF_MAP_SZ + getpagesize());
         fuzzer->linux.perfMmapBuf = NULL;
+    }
+
+    if (hfuzz->dynFileMethod & _HF_DYNFILE_INSTR_COUNT) {
+        close(fuzzer->linux.cpuInstrFd);
+        fuzzer->linux.cpuInstrFd = -1;
+    }
+    if (hfuzz->dynFileMethod & _HF_DYNFILE_BRANCH_COUNT) {
+        close(fuzzer->linux.cpuBranchFd);
+        fuzzer->linux.cpuBranchFd = -1;
+    }
+    if (hfuzz->dynFileMethod & _HF_DYNFILE_BTS_BLOCK) {
+        close(fuzzer->linux.cpuIptBtsFd);
+        fuzzer->linux.cpuIptBtsFd = -1;
+    }
+    if (hfuzz->dynFileMethod & _HF_DYNFILE_BTS_EDGE) {
+        close(fuzzer->linux.cpuIptBtsFd);
+        fuzzer->linux.cpuIptBtsFd = -1;
+    }
+    if (hfuzz->dynFileMethod & _HF_DYNFILE_IPT_BLOCK) {
+        close(fuzzer->linux.cpuIptBtsFd);
+        fuzzer->linux.cpuIptBtsFd = -1;
+    }
+}
+
+bool arch_perfEnable(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
+{
+    if (hfuzz->dynFileMethod == _HF_DYNFILE_NONE) {
+        return true;
+    }
+
+    if (hfuzz->dynFileMethod & _HF_DYNFILE_INSTR_COUNT) {
+        ioctl(fuzzer->linux.cpuInstrFd, PERF_EVENT_IOC_ENABLE, 0);
+    }
+    if (hfuzz->dynFileMethod & _HF_DYNFILE_BRANCH_COUNT) {
+        ioctl(fuzzer->linux.cpuBranchFd, PERF_EVENT_IOC_ENABLE, 0);
+    }
+    if (hfuzz->dynFileMethod & _HF_DYNFILE_BTS_BLOCK) {
+        ioctl(fuzzer->linux.cpuIptBtsFd, PERF_EVENT_IOC_ENABLE, 0);
+    }
+    if (hfuzz->dynFileMethod & _HF_DYNFILE_BTS_EDGE) {
+        ioctl(fuzzer->linux.cpuIptBtsFd, PERF_EVENT_IOC_ENABLE, 0);
+    }
+    if (hfuzz->dynFileMethod & _HF_DYNFILE_IPT_BLOCK) {
+        ioctl(fuzzer->linux.cpuIptBtsFd, PERF_EVENT_IOC_ENABLE, 0);
+    }
+
+    return true;
+}
+
+void arch_perfAnalyze(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
+{
+    if (hfuzz->dynFileMethod == _HF_DYNFILE_NONE) {
+        return;
+    }
+
+    uint64_t instrCount = 0;
+    if (hfuzz->dynFileMethod & _HF_DYNFILE_INSTR_COUNT) {
+        ioctl(fuzzer->linux.cpuInstrFd, PERF_EVENT_IOC_DISABLE, 0);
+        if (files_readFromFd(fuzzer->linux.cpuInstrFd, (uint8_t *) & instrCount, sizeof(instrCount))
+            != sizeof(instrCount)) {
+            PLOG_E("read(perfFd='%d') failed", fuzzer->linux.cpuInstrFd);
+        }
+        ioctl(fuzzer->linux.cpuInstrFd, PERF_EVENT_IOC_RESET, 0);
+    }
+
+    uint64_t branchCount = 0;
+    if (hfuzz->dynFileMethod & _HF_DYNFILE_BRANCH_COUNT) {
+        ioctl(fuzzer->linux.cpuBranchFd, PERF_EVENT_IOC_DISABLE, 0);
+        if (files_readFromFd
+            (fuzzer->linux.cpuBranchFd, (uint8_t *) & branchCount,
+             sizeof(branchCount)) != sizeof(branchCount)) {
+            PLOG_E("read(perfFd='%d') failed", fuzzer->linux.cpuBranchFd);
+        }
+        ioctl(fuzzer->linux.cpuBranchFd, PERF_EVENT_IOC_RESET, 0);
+    }
+
+    if (hfuzz->dynFileMethod & _HF_DYNFILE_BTS_BLOCK) {
+        ioctl(fuzzer->linux.cpuIptBtsFd, PERF_EVENT_IOC_DISABLE, 0);
+        arch_perfMmapParse(hfuzz, fuzzer);
+        ioctl(fuzzer->linux.cpuIptBtsFd, PERF_EVENT_IOC_RESET, 0);
+    }
+    if (hfuzz->dynFileMethod & _HF_DYNFILE_BTS_EDGE) {
+        ioctl(fuzzer->linux.cpuIptBtsFd, PERF_EVENT_IOC_DISABLE, 0);
+        arch_perfMmapParse(hfuzz, fuzzer);
+        ioctl(fuzzer->linux.cpuIptBtsFd, PERF_EVENT_IOC_RESET, 0);
+    }
+    if (hfuzz->dynFileMethod & _HF_DYNFILE_IPT_BLOCK) {
+        ioctl(fuzzer->linux.cpuIptBtsFd, PERF_EVENT_IOC_DISABLE, 0);
+        arch_perfMmapParse(hfuzz, fuzzer);
+        ioctl(fuzzer->linux.cpuIptBtsFd, PERF_EVENT_IOC_RESET, 0);
+    }
+
+    if (fuzzer->linux.perfMmapBuf != NULL) {
+        struct perf_event_mmap_page *pem = (struct perf_event_mmap_page *)fuzzer->linux.perfMmapBuf;
+        ATOMIC_SET(pem->data_head, 0);
+        ATOMIC_SET(pem->data_tail, 0);
+#if defined(PERF_ATTR_SIZE_VER5)
+        ATOMIC_SET(pem->aux_head, 0);
+        ATOMIC_SET(pem->aux_tail, 0);
+#endif                          /* defined(PERF_ATTR_SIZE_VER5) */
     }
 
     fuzzer->linux.hwCnts.cpuInstrCnt = instrCount;

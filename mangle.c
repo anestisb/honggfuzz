@@ -342,6 +342,12 @@ static void mangle_DecByte(honggfuzz_t * hfuzz UNUSED, fuzzer_t * fuzzer)
     fuzzer->dynamicFile[off] -= (uint8_t) 1UL;
 }
 
+static void mangle_NegByte(honggfuzz_t * hfuzz UNUSED, fuzzer_t * fuzzer)
+{
+    size_t off = util_rndGet(0, fuzzer->dynamicFileSz - 1);
+    fuzzer->dynamicFile[off] = ~(fuzzer->dynamicFile[off]);
+}
+
 static void mangle_CloneByte(honggfuzz_t * hfuzz UNUSED, fuzzer_t * fuzzer)
 {
     size_t off1 = util_rndGet(0, fuzzer->dynamicFileSz - 1);
@@ -392,10 +398,10 @@ static void mangle_InsertRnd(honggfuzz_t * hfuzz UNUSED, fuzzer_t * fuzzer)
 
 void mangle_mangleContent(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 {
-    /* In 20% of cases: resize the file */
-    if (util_rndGet(0, 5) == 0) {
-        mangle_Resize(hfuzz, fuzzer);
+    if (fuzzer->flipRate == 0.0f) {
+        return;
     }
+
     static void (*const mangleFuncs[]) (honggfuzz_t * hfuzz, fuzzer_t * fuzzer) = {
     /*  *INDENT-OFF* */
         mangle_Byte,
@@ -410,6 +416,7 @@ void mangle_mangleContent(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
         mangle_Magic,
         mangle_IncByte,
         mangle_DecByte,
+        mangle_NegByte,
         mangle_AddSub,
         mangle_Dictionary,
         mangle_DictionaryInsert,
@@ -420,6 +427,7 @@ void mangle_mangleContent(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
         mangle_Expand,
         mangle_Shrink,
         mangle_InsertRnd,
+        mangle_Resize,
     /* *INDENT-ON* */
     };
 
