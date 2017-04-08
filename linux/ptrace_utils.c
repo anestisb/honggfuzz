@@ -1210,7 +1210,9 @@ void arch_ptraceAnalyze(honggfuzz_t * hfuzz, int status, pid_t pid, fuzzer_t * f
                 arch_ptraceAnalyzeData(hfuzz, pid, fuzzer);
             }
         }
-        ptrace(PTRACE_CONT, pid, 0, WSTOPSIG(status));
+        /* Do not deliver SIGSTOP, as we don't support PTRACE_LISTEN anyway */
+        int sig = (WSTOPSIG(status) != SIGSTOP) ? WSTOPSIG(status) : 0;
+        ptrace(PTRACE_CONT, pid, 0, sig);
         return;
     }
 
@@ -1322,10 +1324,13 @@ bool arch_ptraceWaitForPidStop(pid_t pid)
 #define MAX_THREAD_IN_TASK 4096
 bool arch_ptraceAttach(honggfuzz_t * hfuzz, pid_t pid)
 {
-    long seize_options =
-        PTRACE_O_TRACECLONE | PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK | PTRACE_O_TRACEEXIT;
+    long seize_options = PTRACE_O_TRACECLONE | PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK;
     if (hfuzz->linux.pid == 0) {
         seize_options |= PTRACE_O_EXITKILL;
+    }
+    /* The event is only used with sanitizers */
+    if (hfuzz->enableSanitizers) {
+        seize_options |= PTRACE_O_TRACEEXIT;
     }
 
     if (ptrace(PTRACE_SEIZE, pid, NULL, seize_options) == -1) {
@@ -1334,6 +1339,11 @@ bool arch_ptraceAttach(honggfuzz_t * hfuzz, pid_t pid)
     }
 
     LOG_D("Attached to PID: %d", pid);
+
+    /* It only makes sense to attach to threads with -p */
+    if (hfuzz->linux.pid == 0) {
+        return true;
+    }
 
     int tasks[MAX_THREAD_IN_TASK + 1] = { 0 };
     if (!arch_listThreads(tasks, MAX_THREAD_IN_TASK, pid)) {

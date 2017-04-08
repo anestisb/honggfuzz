@@ -145,6 +145,9 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         .cmdline = NULL,
         .cmdline_txt[0] = '\0',
         .inputDir = NULL,
+        .inputDirP = NULL,
+        .fileCnt = 0,
+        .fileCntDone = false,
         .nullifyStdio = false,
         .fuzzStdin = false,
         .saveUnique = true,
@@ -167,15 +170,13 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         .threadsMax = (sysconf(_SC_NPROCESSORS_ONLN) <= 1) ? 1 : sysconf(_SC_NPROCESSORS_ONLN) / 2,
         .reportFile = NULL,
         .asLimit = 0ULL,
-        .fileCnt = 0,
-        .lastFileIndex = 0,
-        .doneFileIndex = 0,
         .clearEnv = false,
         .envs = {
             [0 ... (ARRAYSIZE(hfuzz->envs) - 1)] = NULL,
         },
         .persistent = false,
         .tmout_vtalrm = false,
+        .skipFeedbackOnTimeout = false,
         .enableSanitizers = false,
 #if defined(__ANDROID__)
         .monitorSIGABRT = false,
@@ -184,15 +185,21 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
 #endif
         .threadsActiveCnt = 0,
         .mainPid = getpid(),
+        .terminating = false,
 
         .dictionaryFile = NULL,
         .dictionaryCnt = 0,
+        .dictqCurrent = NULL,
 
         .state = _HF_STATE_UNSET,
         .feedback = NULL,
         .bbFd = -1,
+
         .dynfileq_mutex = PTHREAD_MUTEX_INITIALIZER,
         .dynfileqCnt = 0U,
+        .dynfileqCurrent = NULL,
+
+        .feedback_mutex = PTHREAD_MUTEX_INITIALIZER,
 
         .mutationsCnt = 0,
         .crashesCnt = 0,
@@ -247,13 +254,13 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
             .symsWlCnt = 0,
             .symsWl = NULL,
             .cloneFlags = 0,
+            .kernelOnly = false,
         },
     };
     /*  *INDENT-ON* */
 
     TAILQ_INIT(&hfuzz->dynfileq);
     TAILQ_INIT(&hfuzz->dictq);
-    TAILQ_INIT(&hfuzz->fileq);
 
     /*  *INDENT-OFF* */
     struct custom_option custom_opts[] = {
@@ -289,6 +296,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         {{"tmout_sigvtalrm", no_argument, NULL, 'T'}, "Use SIGVTALRM to kill timeouting processes (default: use SIGKILL)"},
         {{"sanitizers", no_argument, NULL, 'S'}, "Enable sanitizers settings (default: false)"},
         {{"monitor_sigabrt", required_argument, NULL, 0x105}, "Monitor SIGABRT (default: 'false for Android - 'true for other platforms)"},
+        {{"no_fb_timeout", required_argument, NULL, 0x106}, "Skip feedback if the process has timeouted (default: 'false')"},
 
 #if defined(_HF_ARCH_LINUX)
         {{"linux_symbols_bl", required_argument, NULL, 0x504}, "Symbols blacklist filter file (one entry per line)"},
@@ -303,6 +311,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         {{"linux_perf_bts_block", no_argument, NULL, 0x512}, "Use Intel BTS to count unique blocks"},
         {{"linux_perf_bts_edge", no_argument, NULL, 0x513}, "Use Intel BTS to count unique edges"},
         {{"linux_perf_ipt_block", no_argument, NULL, 0x514}, "Use Intel Processor Trace to count unique blocks (requires libipt.so)"},
+        {{"linux_perf_kernel_only", no_argument, NULL, 0x515}, "Gather kernel-only coverage with Intel PT and with Intel BTS"},
         {{"linux_ns_net", no_argument, NULL, 0x0530}, "Use Linux NET namespace isolation"},
         {{"linux_ns_pid", no_argument, NULL, 0x0531}, "Use Linux PID namespace isolation"},
         {{"linux_ns_ipc", no_argument, NULL, 0x0532}, "Use Linux IPC namespace isolation"},
@@ -412,6 +421,9 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
                 hfuzz->monitorSIGABRT = true;
             }
             break;
+        case 0x106:
+            hfuzz->skipFeedbackOnTimeout = true;
+            break;
         case 'P':
             hfuzz->persistent = true;
             break;
@@ -476,6 +488,9 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
             break;
         case 0x514:
             hfuzz->dynFileMethod |= _HF_DYNFILE_IPT_BLOCK;
+            break;
+        case 0x515:
+            hfuzz->linux.kernelOnly = true;
             break;
         case 0x530:
             hfuzz->linux.cloneFlags |= (CLONE_NEWUSER | CLONE_NEWNET);

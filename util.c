@@ -73,7 +73,7 @@ extern void *util_Realloc(void *ptr, size_t sz)
 
 void *util_MMap(size_t sz)
 {
-    void *p = mmap(NULL, sz, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE | MAP_NORESERVE, -1, 0);
+    void *p = mmap(NULL, sz, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
     if (p == MAP_FAILED) {
         LOG_F("mmap(size='%zu')", sz);
     }
@@ -122,6 +122,10 @@ uint64_t util_rndGet(uint64_t min, uint64_t max)
 {
     if (min > max) {
         LOG_F("min:%" PRIu64 " > max:%" PRIu64, min, max);
+    }
+
+    if (max == UINT64_MAX) {
+        return util_rnd64();
     }
 
     return ((util_rnd64() % (max - min + 1)) + min);
@@ -430,6 +434,17 @@ uint64_t util_CRC64(uint8_t * buf, size_t len)
     uint64_t res = 0ULL;
 
     for (size_t i = 0; i < len; i++) {
+        res = util_CRC64ISOPoly[(uint8_t) res ^ buf[i]] ^ (res >> 8);
+    }
+
+    return res;
+}
+
+uint64_t util_CRC64Rev(uint8_t * buf, size_t len)
+{
+    uint64_t res = 0ULL;
+
+    for (ssize_t i = (ssize_t) len - 1; i >= 0; i--) {
         res = util_CRC64ISOPoly[(uint8_t) res ^ buf[i]] ^ (res >> 8);
     }
 
