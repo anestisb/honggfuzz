@@ -53,6 +53,7 @@ endif
 
 # Enable Linux ptrace() instead of POSIX signal interface by default
 ANDROID_WITH_PTRACE ?= true
+ANDROID_LIBUNWIND ?= nongnu
 
 ifeq ($(ANDROID_WITH_PTRACE),true)
   # Additional libcrypto OpenSSL flags required to mitigate bug (ARM systems with API <= 21)
@@ -62,47 +63,58 @@ ifeq ($(ANDROID_WITH_PTRACE),true)
     OPENSSL_ARMCAP_ABI := "7"
   endif
 
-  # Upstream libunwind compiled from sources with Android NDK toolchain
-  LIBUNWIND_A := third_party/android/libunwind/$(ARCH_ABI)/libunwind-$(ARCH_ABI).a
-  ifeq ("$(wildcard $(LIBUNWIND_A))","")
-    $(error libunwind-$(ARCH_ABI) is missing - to build execute \
-            'third_party/android/scripts/compile-libunwind.sh third_party/android/libunwind $(ARCH_ABI)')
+  ifeq ($(ANDROID_LIBUNWIND),$(filter $(ANDROID_LIBUNWIND),nongnu))
+    # Upstream libunwind compiled from sources with Android NDK toolchain
+    LIBUNWIND_A := third_party/android/libunwind/$(ARCH_ABI)/libunwind-$(ARCH_ABI).a
+    ifeq ("$(wildcard $(LIBUNWIND_A))","")
+      $(error libunwind-$(ARCH_ABI) is missing - to build execute \
+              'third_party/android/scripts/compile-libunwind.sh third_party/android/libunwind $(ARCH_ABI)')
+    endif
+
+    include $(CLEAR_VARS)
+    LOCAL_MODULE := libunwind
+    LOCAL_SRC_FILES := third_party/android/libunwind/$(ARCH_ABI)/libunwind.a
+    LOCAL_EXPORT_C_INCLUDES := third_party/android/libunwind/include
+    include $(PREBUILT_STATIC_LIBRARY)
+
+    include $(CLEAR_VARS)
+    LOCAL_MODULE := libunwind-arch
+    LOCAL_SRC_FILES := third_party/android/libunwind/$(ARCH_ABI)/libunwind-$(ARCH_ABI).a
+    LOCAL_EXPORT_C_INCLUDES := third_party/android/libunwind/include
+    include $(PREBUILT_STATIC_LIBRARY)
+
+    include $(CLEAR_VARS)
+    LOCAL_MODULE := libunwind-ptrace
+    LOCAL_SRC_FILES := third_party/android/libunwind/$(ARCH_ABI)/libunwind-ptrace.a
+    LOCAL_EXPORT_C_INCLUDES := third_party/android/libunwind/include
+    include $(PREBUILT_STATIC_LIBRARY)
+
+    LOCAL_MODULE := libunwind-dwarf-generic
+    LOCAL_SRC_FILES := third_party/android/libunwind/$(ARCH_ABI)/libunwind-dwarf-generic.a
+    LOCAL_EXPORT_C_INCLUDES := third_party/android/libunwind/include
+    include $(PREBUILT_STATIC_LIBRARY)
+  else ifeq ($(ANDROID_LIBUNWIND),$(filter $(ANDROID_LIBUNWIND),aosp))
+    # TODO: Automate build script
+    include $(CLEAR_VARS)
+    LOCAL_MODULE := aosp-libunwind
+    LOCAL_SRC_FILES := third_party/android/aosp_libunwind/$(APP_PLATFORM)/$(ARCH_ABI)/libunwind-with-deps.a
+    LOCAL_EXPORT_C_INCLUDES := third_party/android/aosp_libunwind/$(APP_PLATFORM)/include
+    include $(PREBUILT_STATIC_LIBRARY)
+  else
+    $(error Invalid Android unwinder module $(ANDROID_LIBUNWIND))
   endif
 
-  include $(CLEAR_VARS)
-  LOCAL_MODULE := libunwind
-  LOCAL_SRC_FILES := third_party/android/libunwind/$(ARCH_ABI)/libunwind.a
-  LOCAL_EXPORT_C_INCLUDES := third_party/android/libunwind/include
-  include $(PREBUILT_STATIC_LIBRARY)
-
-  include $(CLEAR_VARS)
-  LOCAL_MODULE := libunwind-arch
-  LOCAL_SRC_FILES := third_party/android/libunwind/$(ARCH_ABI)/libunwind-$(ARCH_ABI).a
-  LOCAL_EXPORT_C_INCLUDES := third_party/android/libunwind/include
-  include $(PREBUILT_STATIC_LIBRARY)
-
-  include $(CLEAR_VARS)
-  LOCAL_MODULE := libunwind-ptrace
-  LOCAL_SRC_FILES := third_party/android/libunwind/$(ARCH_ABI)/libunwind-ptrace.a
-  LOCAL_EXPORT_C_INCLUDES := third_party/android/libunwind/include
-  include $(PREBUILT_STATIC_LIBRARY)
-
-  LOCAL_MODULE := libunwind-dwarf-generic
-  LOCAL_SRC_FILES := third_party/android/libunwind/$(ARCH_ABI)/libunwind-dwarf-generic.a
-  LOCAL_EXPORT_C_INCLUDES := third_party/android/libunwind/include
-  include $(PREBUILT_STATIC_LIBRARY)
-
-  # Upstream capstone compiled from sources with Android NDK toolchain
-  LIBCAPSTONE_A := third_party/android/capstone/$(ARCH_ABI)/libcapstone.a
-  ifeq ("$(wildcard $(LIBCAPSTONE_A))","")
-    $(error libcapstone is missing - to build execute \
-            'third_party/android/scripts/compile-capstone.sh third_party/android/capstone $(ARCH_ABI)')
-  endif
-  include $(CLEAR_VARS)
-  LOCAL_MODULE := libcapstone
-  LOCAL_SRC_FILES := $(LIBCAPSTONE_A)
-  LOCAL_EXPORT_C_INCLUDES := third_party/android/capstone/include
-  include $(PREBUILT_STATIC_LIBRARY)
+    # Upstream capstone compiled from sources with Android NDK toolchain
+    LIBCAPSTONE_A := third_party/android/capstone/$(ARCH_ABI)/libcapstone.a
+    ifeq ("$(wildcard $(LIBCAPSTONE_A))","")
+      $(error libcapstone is missing - to build execute \
+              'third_party/android/scripts/compile-capstone.sh third_party/android/capstone $(ARCH_ABI)')
+    endif
+    include $(CLEAR_VARS)
+    LOCAL_MODULE := libcapstone
+    LOCAL_SRC_FILES := $(LIBCAPSTONE_A)
+    LOCAL_EXPORT_C_INCLUDES := third_party/android/capstone/include
+    include $(PREBUILT_STATIC_LIBRARY)
 endif
 
 ifneq (,$(findstring clang,$(NDK_TOOLCHAIN)))
@@ -160,11 +172,15 @@ LOCAL_CFLAGS := $(COMMON_CFLAGS)
 LOCAL_LDFLAGS := -lm -latomic
 
 ifeq ($(ANDROID_WITH_PTRACE),true)
-  LOCAL_STATIC_LIBRARIES += libunwind-arch \
-                            libunwind \
-                            libunwind-ptrace \
-                            libunwind-dwarf-generic \
-                            libcapstone
+  LOCAL_STATIC_LIBRARIES += libcapstone
+  ifeq ($(ANDROID_LIBUNWIND),$(filter $(ANDROID_LIBUNWIND),aosp))
+    LOCAL_STATIC_LIBRARIES += aosp-libunwind
+  else
+    LOCAL_STATIC_LIBRARIES += libunwind-arch \
+      libunwind \
+      libunwind-ptrace \
+      libunwind-dwarf-generic
+  endif
   LOCAL_CFLAGS += -D__HF_USE_CAPSTONE__
   ifeq ($(ARCH_ABI),arm)
     LOCAL_CFLAGS += -DOPENSSL_ARMCAP_ABI='$(OPENSSL_ARMCAP_ABI)'
