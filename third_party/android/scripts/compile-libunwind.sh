@@ -17,6 +17,8 @@
 
 #set -x # debug
 
+readonly JOBS=$(getconf _NPROCESSORS_ONLN)
+
 abort() {
   # Revert patches if not debugging
   if [[ "$-" == *x* ]]; then
@@ -190,7 +192,7 @@ if [ "$ARCH" == "arm64" ]; then
   echo "#define HAVE_DECL_PT_GETREGSET 1" >> include/config.h
 fi
 
-make CFLAGS="$LC_CFLAGS" LDFLAGS="$LC_LDFLAGS"
+make -j"$JOBS" CFLAGS="$LC_CFLAGS" LDFLAGS="$LC_LDFLAGS"
 if [ $? -ne 0 ]; then
     echo "[-] Compilation failed"
     cd - &>/dev/null
