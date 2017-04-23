@@ -168,9 +168,9 @@ export CXX="$NDK/toolchains/$TOOLCHAIN_S/prebuilt/$HOST_OS-$HOST_ARCH/bin/$TOOLC
 export PATH="$NDK/toolchains/$TOOLCHAIN_S/prebuilt/$HOST_OS-$HOST_ARCH/bin":$PATH
 
 if [ ! -f configure ]; then
-  autoreconf -i
+  NOCONFIGURE=true ./autogen.sh
   if [ $? -ne 0 ]; then
-    echo "[-] autoreconf failed"
+    echo "[-] autogen failed"
     abort 1
   fi
   # Patch configure
