@@ -142,7 +142,7 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := hfuzz
 LOCAL_SRC_FILES := $(wildcard libhfuzz/*.c)
 LOCAL_CFLAGS := -D_HF_ARCH_${ARCH} $(COMMON_CFLAGS) \
-	-fPIC -fno-builtin -fno-stack-protector
+  -fPIC -fno-builtin -fno-stack-protector
 
 ifneq (,$(findstring clang,$(NDK_TOOLCHAIN)))
   LOCAL_CFLAGS += -fblocks
@@ -190,5 +190,5 @@ POST_BUILD_EVENT:
 	@echo $(APP_PLATFORM) > $(MY_LOCAL_PATH)/libs/$(TARGET_ARCH_ABI)/android_api.txt
 	@echo $(NDK_TOOLCHAIN) > $(MY_LOCAL_PATH)/libs/$(TARGET_ARCH_ABI)/ndk_toolchain.txt
 	@test -f $(MY_LOCAL_PATH)/obj/local/$(TARGET_ARCH_ABI)/libhfuzz.a && \
-	  cp $(MY_LOCAL_PATH)/obj/local/$(TARGET_ARCH_ABI)/libhfuzz.a \
-	    $(MY_LOCAL_PATH)/libs/$(TARGET_ARCH_ABI)/libhfuzz.a || true
+    cp $(MY_LOCAL_PATH)/obj/local/$(TARGET_ARCH_ABI)/libhfuzz.a \
+    $(MY_LOCAL_PATH)/libs/$(TARGET_ARCH_ABI)/libhfuzz.a || true
