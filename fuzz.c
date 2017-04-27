@@ -130,14 +130,22 @@ static bool fuzz_prepareFile(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, bool rewind
 
 static bool fuzz_prepareFileExternally(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 {
-    fuzzer->origFileName = "[EXTERNAL]";
-
-    int dstfd = open(fuzzer->fileName, O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0644);
-    if (dstfd == -1) {
-        PLOG_E("Couldn't create a temporary file '%s'", fuzzer->fileName);
-        return false;
+    char fname[PATH_MAX];
+    if (files_getNext(hfuzz, fname, true /* rewind */ )) {
+        fuzzer->origFileName = files_basename(fname);
+        if (files_copyFile(fname, fuzzer->fileName, NULL, false /* try_link */ ) == false) {
+            LOG_E("files_copyFile('%s', '%s')", fname, fuzzer->fileName);
+            return false;
+        }
+    } else {
+        fuzzer->origFileName = "[EXTERNAL]";
+        int dstfd = open(fuzzer->fileName, O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0644);
+        if (dstfd == -1) {
+            PLOG_E("Couldn't create a temporary file '%s'", fuzzer->fileName);
+            return false;
+        }
+        close(dstfd);
     }
-    close(dstfd);
 
     LOG_D("Created '%s' as an input file", fuzzer->fileName);
 
@@ -315,7 +323,7 @@ static bool fuzz_runVerifier(honggfuzz_t * hfuzz, fuzzer_t * crashedFuzzer)
 
     /* Copy file with new suffix & remove original copy */
     bool dstFileExists = false;
-    if (files_copyFile(crashedFuzzer->crashFileName, verFile, &dstFileExists)) {
+    if (files_copyFile(crashedFuzzer->crashFileName, verFile, &dstFileExists, true /* try_link */ )) {
         LOG_I("Successfully verified, saving as (%s)", verFile);
         ATOMIC_POST_INC(hfuzz->verifiedCrashesCnt);
         unlink(crashedFuzzer->crashFileName);
@@ -515,9 +523,15 @@ static void fuzz_fuzzLoop(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 
     if (fuzzer->state == _HF_STATE_DYNAMIC_PRE) {
         fuzzer->flipRate = 0.0f;
-        if (fuzz_prepareFile(hfuzz, fuzzer, false /* rewind */ ) == false) {
-            fuzz_setState(hfuzz, _HF_STATE_DYNAMIC_MAIN);
-            fuzzer->state = fuzz_getState(hfuzz);
+        if (hfuzz->externalCommand) {
+            if (!fuzz_prepareFileExternally(hfuzz, fuzzer)) {
+                LOG_F("fuzz_prepareFileExternally() failed");
+            }
+        } else {
+            if (fuzz_prepareFile(hfuzz, fuzzer, false /* rewind */ ) == false) {
+                fuzz_setState(hfuzz, _HF_STATE_DYNAMIC_MAIN);
+                fuzzer->state = fuzz_getState(hfuzz);
+            }
         }
     }
     if (fuzzer->state == _HF_STATE_DYNAMIC_MAIN) {
