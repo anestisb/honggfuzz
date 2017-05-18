@@ -7,11 +7,11 @@ Honggfuzz is capable of fuzzing APIs, which is to say; to test new data within t
 
 # HowTo #
 
-One can prepare a binary in the two following ways
+One can prepare a binary in the two following ways:
 
 ## ASAN-style ##
 
-Two functions need to be prepared
+Two functions must be prepared
 
 ```int LLVMFuzzerTestOneInput(uint8_t *buf, size_t len)```
 
@@ -19,9 +19,8 @@ and (optional)
 
 ```int LLVMFuzzerInitialize(int *argc, char ***argv)```
 
-Example:
+Example (test.c):
 ```
-$ cat test.c
 int LLVMFuzzerTestOneInput(uint8_t *buf, size_t len) {
 	TestAPI(buf, len);
 	return 0;
@@ -30,7 +29,7 @@ int LLVMFuzzerTestOneInput(uint8_t *buf, size_t len) {
 
 Compilation:
 ```
-$ clang test.c -o test ~/honggfuzz/libfuzz/libfuzz.a
+$ hfuzz_cc/hfuzz_clang test.c -o test
 ```
 
 Execution:
@@ -42,10 +41,11 @@ $ honggfuzz -P -- ./test
 
 A complete program needs to be prepared, using ```HF_ITER``` symbol to obtain new inputs
 
-Example:
-```
-$ cat test.c
+Example (test.c):
+```c
 #include <inttypes.h>
+
+extern HF_ITER(uint8_t** buf, size_t* len);
 
 int main(void) {
 	for (;;) {
@@ -61,7 +61,7 @@ int main(void) {
 
 Compilation:
 ```
-$ clang test.c -o test ~/honggfuzz/libfuzz/libfuzz.a
+$ hfuzz_cc/hfuzz_clang test.c -o test ~/honggfuzz/libfuzz/libfuzz.a
 ```
 
 Execution:
@@ -80,5 +80,6 @@ $ honggfuzz -P -z -- ./test
 
 Example (hardware-based)
 ```
-$ honggfuzz -P --linux_perf_bts_block -- ./test
+$ honggfuzz -P --linux_perf_bts_edge -- ./test
+$ honggfuzz -P --linux_perf_ipt_block -- ./test
 ```
