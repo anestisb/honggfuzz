@@ -142,7 +142,7 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := hfuzz
 LOCAL_SRC_FILES := $(wildcard libhfuzz/*.c)
 LOCAL_CFLAGS := -D_HF_ARCH_${ARCH} $(COMMON_CFLAGS) \
-	-fPIC -fno-builtin -fno-stack-protector
+  -fPIC -fno-builtin -fno-stack-protector
 
 ifneq (,$(findstring clang,$(NDK_TOOLCHAIN)))
   LOCAL_CFLAGS += -fblocks
@@ -161,10 +161,10 @@ LOCAL_LDFLAGS := -lm -latomic
 
 ifeq ($(ANDROID_WITH_PTRACE),true)
   LOCAL_STATIC_LIBRARIES += libunwind-arch \
-                            libunwind \
-                            libunwind-ptrace \
-                            libunwind-dwarf-generic \
-                            libcapstone
+    libunwind \
+    libunwind-ptrace \
+    libunwind-dwarf-generic \
+    libcapstone
   LOCAL_CFLAGS += -D__HF_USE_CAPSTONE__
   ifeq ($(ARCH_ABI),arm)
     LOCAL_CFLAGS += -DOPENSSL_ARMCAP_ABI='$(OPENSSL_ARMCAP_ABI)'
@@ -190,5 +190,5 @@ POST_BUILD_EVENT:
 	@echo $(APP_PLATFORM) > $(MY_LOCAL_PATH)/libs/$(TARGET_ARCH_ABI)/android_api.txt
 	@echo $(NDK_TOOLCHAIN) > $(MY_LOCAL_PATH)/libs/$(TARGET_ARCH_ABI)/ndk_toolchain.txt
 	@test -f $(MY_LOCAL_PATH)/obj/local/$(TARGET_ARCH_ABI)/libhfuzz.a && \
-	  cp $(MY_LOCAL_PATH)/obj/local/$(TARGET_ARCH_ABI)/libhfuzz.a \
-	    $(MY_LOCAL_PATH)/libs/$(TARGET_ARCH_ABI)/libhfuzz.a || true
+    cp $(MY_LOCAL_PATH)/obj/local/$(TARGET_ARCH_ABI)/libhfuzz.a \
+    $(MY_LOCAL_PATH)/libs/$(TARGET_ARCH_ABI)/libhfuzz.a || true

@@ -17,6 +17,8 @@
 
 #set -x # debug
 
+readonly JOBS=$(getconf _NPROCESSORS_ONLN)
+
 abort() {
   # Revert patches if not debugging
   if [[ "$-" == *x* ]]; then
@@ -166,9 +168,9 @@ export CXX="$NDK/toolchains/$TOOLCHAIN_S/prebuilt/$HOST_OS-$HOST_ARCH/bin/$TOOLC
 export PATH="$NDK/toolchains/$TOOLCHAIN_S/prebuilt/$HOST_OS-$HOST_ARCH/bin":$PATH
 
 if [ ! -f configure ]; then
-  autoreconf -i
+  NOCONFIGURE=true ./autogen.sh
   if [ $? -ne 0 ]; then
-    echo "[-] autoreconf failed"
+    echo "[-] autogen failed"
     abort 1
   fi
   # Patch configure
@@ -190,7 +192,7 @@ if [ "$ARCH" == "arm64" ]; then
   echo "#define HAVE_DECL_PT_GETREGSET 1" >> include/config.h
 fi
 
-make CFLAGS="$LC_CFLAGS" LDFLAGS="$LC_LDFLAGS"
+make -j"$JOBS" CFLAGS="$LC_CFLAGS" LDFLAGS="$LC_LDFLAGS"
 if [ $? -ne 0 ]; then
     echo "[-] Compilation failed"
     cd - &>/dev/null
