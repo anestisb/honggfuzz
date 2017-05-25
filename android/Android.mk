@@ -149,27 +149,32 @@ COMMON_CFLAGS := -std=c11 -I. \
   -Wno-unknown-warning-option -Werror -funroll-loops -O2 \
   -Wframe-larger-than=51200
 
+# libcommon module
+include $(CLEAR_VARS)
+LOCAL_MODULE := common
+LOCAL_SRC_FILES := $(wildcard libcommon/*.c)
+LOCAL_CFLAGS := -D_HF_ARCH_${ARCH} $(COMMON_CFLAGS)
+include $(BUILD_STATIC_LIBRARY)
+
 # libhfuzz module
 include $(CLEAR_VARS)
 LOCAL_MODULE := hfuzz
 LOCAL_SRC_FILES := $(wildcard libhfuzz/*.c)
 LOCAL_CFLAGS := -D_HF_ARCH_${ARCH} $(COMMON_CFLAGS) \
   -fPIC -fno-builtin -fno-stack-protector
-
 ifneq (,$(findstring clang,$(NDK_TOOLCHAIN)))
   LOCAL_CFLAGS += -fblocks
   LOCAL_STATIC_LIBRARIES += libblocksruntime
 endif
-
 include $(BUILD_STATIC_LIBRARY)
 
 # Main honggfuzz module
 include $(CLEAR_VARS)
-
 LOCAL_MODULE := honggfuzz
 LOCAL_SRC_FILES := $(wildcard *.c)
 LOCAL_CFLAGS := $(COMMON_CFLAGS)
 LOCAL_LDFLAGS := -lm -latomic
+LOCAL_STATIC_LIBRARIES += common
 
 ifeq ($(ANDROID_WITH_PTRACE),true)
   LOCAL_STATIC_LIBRARIES += libcapstone
