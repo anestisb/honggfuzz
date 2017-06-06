@@ -33,6 +33,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -68,7 +69,7 @@ ssize_t files_readFileToBufMax(char *fileName, uint8_t * buf, size_t fileMaxSz)
     return readSz;
 }
 
-bool files_writeBufToFile(char *fileName, uint8_t * buf, size_t fileSz, int flags)
+bool files_writeBufToFile(const char *fileName, const uint8_t * buf, size_t fileSz, int flags)
 {
     int fd = open(fileName, flags, 0644);
     if (fd == -1) {
@@ -149,6 +150,22 @@ bool files_writePatternToFd(int fd, off_t size, unsigned char p)
     int ret = files_writeToFd(fd, buf, size);
 
     return ret;
+}
+
+bool files_sendToSocketNB(int fd, const uint8_t * buf, size_t fileSz)
+{
+    size_t writtenSz = 0;
+    while (writtenSz < fileSz) {
+        ssize_t sz = send(fd, &buf[writtenSz], fileSz - writtenSz, MSG_NOSIGNAL | MSG_DONTWAIT);
+        if (sz < 0 && errno == EINTR)
+            continue;
+
+        if (sz < 0)
+            return false;
+
+        writtenSz += sz;
+    }
+    return true;
 }
 
 static bool files_getDirStatsAndRewind(honggfuzz_t * hfuzz)
@@ -278,11 +295,16 @@ bool files_init(honggfuzz_t * hfuzz)
         return false;
     }
 
-    if ((hfuzz->inputDirP = opendir(hfuzz->inputDir)) == NULL) {
+    int dir_fd = open(hfuzz->inputDir, O_DIRECTORY | O_RDONLY | O_CLOEXEC);
+    if (dir_fd == -1) {
+        PLOG_W("open('%s', O_DIRECTORY|O_RDONLY|O_CLOEXEC)", hfuzz->inputDir);
+        return false;
+    }
+    if ((hfuzz->inputDirP = fdopendir(dir_fd)) == NULL) {
+        close(dir_fd);
         PLOG_W("opendir('%s')", hfuzz->inputDir);
         return false;
     }
-
     if (files_getDirStatsAndRewind(hfuzz) == false) {
         hfuzz->fileCnt = 0U;
         LOG_W("files_getDirStatsAndRewind('%s')", hfuzz->inputDir);
@@ -309,21 +331,41 @@ bool files_parseDictionary(honggfuzz_t * hfuzz)
         fclose(fDict);
     };
 
+    char *lineptr = NULL;
+    size_t n = 0;
+    defer {
+        free(lineptr);
+    };
     for (;;) {
-        char *lineptr = NULL;
-        size_t n = 0;
         ssize_t len = getdelim(&lineptr, &n, '\n', fDict);
         if (len == -1) {
             break;
         }
-        if (n > 1 && lineptr[len - 1] == '\n') {
+        if (len > 1 && lineptr[len - 1] == '\n') {
             lineptr[len - 1] = '\0';
             len--;
         }
+        if (lineptr[0] == '#') {
+            continue;
+        }
+        if (lineptr[0] == '\n') {
+            continue;
+        }
+        if (lineptr[0] == '\0') {
+            continue;
+        }
+        char bufn[1025] = { 0 };
+        char bufv[1025] = { 0 };
+        if (sscanf(lineptr, "\"%1024[^\"]\"", bufv) != 1 &&
+            sscanf(lineptr, "%1024[^=]=\"%1024[^\"]\"", bufn, bufv) != 2) {
+            LOG_W("Incorrect dictionary entry: '%s'. Skipping", lineptr);
+            continue;
+        }
 
+        char *s = util_StrDup(bufv);
         struct strings_t *str = (struct strings_t *)util_Malloc(sizeof(struct strings_t));
-        str->len = util_decodeCString(lineptr);
-        str->s = lineptr;
+        str->len = util_decodeCString(s);
+        str->s = s;
         hfuzz->dictionaryCnt += 1;
         TAILQ_INSERT_TAIL(&hfuzz->dictq, str, pointers);
 
