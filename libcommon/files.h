@@ -36,7 +36,8 @@ extern bool files_getNext(honggfuzz_t * hfuzz, char *fname, bool rewind);
 
 extern ssize_t files_readFileToBufMax(char *fileName, uint8_t * buf, size_t fileMaxSz);
 
-extern bool files_writeBufToFile(char *fileName, uint8_t * buf, size_t fileSz, int flags);
+extern bool files_writeBufToFile(const char *fileName, const uint8_t * buf, size_t fileSz,
+                                 int flags);
 
 extern bool files_writeToFd(int fd, const uint8_t * buf, size_t fileSz);
 
@@ -45,6 +46,8 @@ extern bool files_writeStrToFd(int fd, const char *str);
 extern ssize_t files_readFromFd(int fd, uint8_t * buf, size_t fileSz);
 
 extern bool files_writePatternToFd(int fd, off_t size, unsigned char p);
+
+bool files_sendToSocketNB(int fd, const uint8_t * buf, size_t fileSz);
 
 extern bool files_exists(char *fileName);
 

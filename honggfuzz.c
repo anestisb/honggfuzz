@@ -34,11 +34,11 @@
 #include <fcntl.h>
 
 #include "libcommon/common.h"
-#include "libcommon/display.h"
 #include "libcommon/log.h"
 #include "libcommon/files.h"
 #include "libcommon/util.h"
 #include "cmdline.h"
+#include "display.h"
 #include "fuzz.h"
 
 static int sigReceived = 0;
@@ -248,10 +248,6 @@ int main(int argc, char **argv)
         }
 #endif
         pause();
-    }
-
-    if (hfuzz.useScreen) {
-        display_fini();
     }
 
     if (ATOMIC_GET(sigReceived) > 0) {
