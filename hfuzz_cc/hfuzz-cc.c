@@ -128,9 +128,40 @@ static int execCC(int argc, char **argv)
     return EXIT_FAILURE;
 }
 
+char *getLibHfuzzIncPath(void)
+{
+#if !defined(_HFUZZ_LHFUZZ_INC_PATH)
+#error "You need to define _HFUZZ_LHFUZZ_INC_PATH"
+#endif
+
+    static char path[PATH_MAX];
+    snprintf(path, sizeof(path), "-I%s", _XSTR(_HFUZZ_LHFUZZ_INC_PATH));
+    return path;
+}
+
+static void commonOpts(int *j, char **args)
+{
+    args[(*j)++] = getLibHfuzzIncPath();
+    if (isGCC) {
+        args[(*j)++] = "-fsanitize-coverage=trace-pc";
+    } else {
+        args[(*j)++] = "-Wno-unused-command-line-argument";
+        args[(*j)++] = "-fsanitize-coverage=trace-pc-guard,trace-cmp,indirect-calls";
+        args[(*j)++] = "-mllvm";
+        args[(*j)++] = "-sanitizer-coverage-prune-blocks=0";
+        args[(*j)++] = "-mllvm";
+        args[(*j)++] = "-sanitizer-coverage-block-threshold=10000000";
+        args[(*j)++] = "-mllvm";
+        args[(*j)++] = "-sanitizer-coverage-level=3";
+    }
+    args[(*j)++] = "-funroll-loops";
+    args[(*j)++] = "-fno-inline";
+    args[(*j)++] = "-fno-builtin";
+}
+
 static int ccMode(int argc, char **argv)
 {
-    char *args[4096];
+    char *args[ARGS_MAX];
 
     int j = 0;
     if (isCXX) {
@@ -138,20 +169,7 @@ static int ccMode(int argc, char **argv)
     } else {
         args[j++] = "cc";
     }
-    if (isGCC) {
-        args[j++] = "-fsanitize-coverage=trace-pc";
-    } else {
-        args[j++] = "-fsanitize-coverage=trace-pc-guard,trace-cmp,indirect-calls";
-        args[j++] = "-mllvm";
-        args[j++] = "-sanitizer-coverage-prune-blocks=0";
-        args[j++] = "-mllvm";
-        args[j++] = "-sanitizer-coverage-block-threshold=10000000";
-        args[j++] = "-mllvm";
-        args[j++] = "-sanitizer-coverage-level=3";
-    }
-    args[j++] = "-funroll-loops";
-    args[j++] = "-fno-inline";
-    args[j++] = "-fno-builtin";
+    commonOpts(&j, args);
 
     for (int i = 1; i < argc; i++) {
         args[j++] = argv[i];
@@ -205,7 +223,7 @@ static int ldMode(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    char *args[4096];
+    char *args[ARGS_MAX];
 
     int j = 0;
     if (isCXX) {
@@ -217,26 +235,31 @@ static int ldMode(int argc, char **argv)
     args[j++] = "-Wl,--whole-archive";
     args[j++] = LHFUZZ_A_PATH;
     args[j++] = "-Wl,--no-whole-archive";
-    if (isGCC) {
-        args[j++] = "-fsanitize-coverage=trace-pc";
-    } else {
-        args[j++] = "-fsanitize-coverage=trace-pc-guard,trace-cmp,indirect-calls";
-        args[j++] = "-mllvm";
-        args[j++] = "-sanitizer-coverage-prune-blocks=0";
-        args[j++] = "-mllvm";
-        args[j++] = "-sanitizer-coverage-block-threshold=10000000";
-        args[j++] = "-mllvm";
-        args[j++] = "-sanitizer-coverage-level=3";
-    }
-    args[j++] = "-funroll-loops";
-    args[j++] = "-fno-inline";
-    args[j++] = "-fno-builtin";
+
+    args[j++] = "-Wl,--wrap=strcmp";
+    args[j++] = "-Wl,--wrap=strcasecmp";
+    args[j++] = "-Wl,--wrap=strncmp";
+    args[j++] = "-Wl,--wrap=strncasecmp";
+    args[j++] = "-Wl,--wrap=strstr";
+    args[j++] = "-Wl,--wrap=strcasestr";
+    args[j++] = "-Wl,--wrap=memcmp";
+    args[j++] = "-Wl,--wrap=bcmp";
+    args[j++] = "-Wl,--wrap=memmem";
+    args[j++] = "-Wl,--wrap=CRYPTO_memcmp";
+    args[j++] = "-Wl,--wrap=OPENSSL_memcmp";
+    args[j++] = "-Wl,--wrap=OPENSSL_strcasecmp";
+    args[j++] = "-Wl,--wrap=OPENSSL_strncasecmp";
+
+    commonOpts(&j, args);
 
     int i;
     for (i = 1; i < argc; i++) {
         args[j++] = argv[i];
     }
     args[j++] = LHFUZZ_A_PATH;
+#if defined(__clang__)
+    args[j++] = "-lBlocksRuntime";
+#endif                          /*  defined(__clang__) */
 
     return execCC(j, args);
 }
@@ -246,17 +269,17 @@ int main(int argc, char **argv)
     if (strstr(argv[0], "++") != NULL) {
         isCXX = true;
     }
-    if (strstr(argv[0], "gcc") != NULL) {
+    if (strstr(argv[0], "-gcc") != NULL) {
         isGCC = true;
     }
-    if (strstr(argv[0], "g++") != NULL) {
+    if (strstr(argv[0], "-g++") != NULL) {
         isGCC = true;
     }
     if (argc <= 1) {
         LOG_I("'%s': No arguments provided", argv[0]);
         return execCC(argc, argv);
     }
-    if (argc > (ARGS_MAX - 4)) {
+    if (argc > (ARGS_MAX - 128)) {
         LOG_F("'%s': Too many positional arguments: %d", argv[0], argc);
         return EXIT_FAILURE;
     }

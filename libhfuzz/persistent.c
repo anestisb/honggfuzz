@@ -1,4 +1,5 @@
 #include "../libcommon/common.h"
+#include "libhfuzz.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -16,8 +17,16 @@
 #include "../libcommon/log.h"
 #include "../libcommon/files.h"
 
-int LLVMFuzzerTestOneInput(uint8_t * buf, size_t len) __attribute__ ((weak));
+int LLVMFuzzerTestOneInput(const uint8_t * buf, size_t len) __attribute__ ((weak));
 int LLVMFuzzerInitialize(int *argc, char ***argv) __attribute__ ((weak));
+
+/* FIXME(robertswiecki): Make it call mangle_Mangle() */
+__attribute__ ((weak))
+size_t LLVMFuzzerMutate(uint8_t * Data UNUSED, size_t Size UNUSED, size_t MaxSize UNUSED)
+{
+    LOG_F("LLVMFuzzerMutate() is not supported in honggfuzz yet");
+    return 0;
+}
 
 static uint8_t buf[_HF_PERF_BITMAP_SIZE_16M] = { 0 };
 
@@ -26,7 +35,7 @@ static inline bool readFromFdAll(int fd, uint8_t * buf, size_t len)
     return (files_readFromFd(fd, buf, len) == (ssize_t) len);
 }
 
-void HF_ITER(uint8_t ** buf_ptr, size_t * len_ptr)
+void HF_ITER(const uint8_t ** buf_ptr, size_t * len_ptr)
 {
     /*
      * Send the 'done' marker to the parent
@@ -58,7 +67,7 @@ void HF_ITER(uint8_t ** buf_ptr, size_t * len_ptr)
     *len_ptr = len;
 }
 
-static void runOneInput(uint8_t * buf, size_t len)
+static void runOneInput(const uint8_t * buf, size_t len)
 {
     int ret = LLVMFuzzerTestOneInput(buf, len);
     if (ret != 0) {
@@ -82,10 +91,21 @@ int main(int argc, char **argv)
     }
 
     if (fcntl(_HF_PERSISTENT_FD, F_GETFD) == -1 && errno == EBADF) {
-        LOG_I("Accepting input from stdin\n"
-              "Usage for fuzzing: honggfuzz -P [flags] -- %s", argv[0]);
+        int in_fd = STDIN_FILENO;
+        const char *fname = "[STDIN]";
+        if (argc > 1) {
+            fname = argv[argc - 1];
+            if ((in_fd = open(argv[argc - 1], O_RDONLY)) == -1) {
+                PLOG_W("Cannot open '%s' as input, using stdin", argv[argc - 1]);
+                in_fd = STDIN_FILENO;
+                fname = "[STDIN]";
+            }
+        }
 
-        ssize_t len = files_readFromFd(STDIN_FILENO, buf, sizeof(buf));
+        LOG_I("Accepting input from '%s'\n"
+              "Usage for fuzzing: honggfuzz -P [flags] -- %s", fname, argv[0]);
+
+        ssize_t len = files_readFromFd(in_fd, buf, sizeof(buf));
         if (len < 0) {
             LOG_E("Couldn't read data from stdin: %s", strerror(errno));
             return -1;
@@ -97,7 +117,7 @@ int main(int argc, char **argv)
 
     for (;;) {
         size_t len;
-        uint8_t *buf;
+        const uint8_t *buf;
 
         HF_ITER(&buf, &len);
         runOneInput(buf, len);
