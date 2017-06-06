@@ -156,7 +156,7 @@ bool files_sendToSocketNB(int fd, const uint8_t * buf, size_t fileSz)
 {
     size_t writtenSz = 0;
     while (writtenSz < fileSz) {
-        ssize_t sz = send(fd, &buf[writtenSz], fileSz - writtenSz, MSG_NOSIGNAL | MSG_DONTWAIT);
+        ssize_t sz = send(fd, &buf[writtenSz], fileSz - writtenSz, MSG_DONTWAIT);
         if (sz < 0 && errno == EINTR)
             continue;
 
