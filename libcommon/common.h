@@ -235,6 +235,7 @@ typedef struct {
     uint32_t threadsActiveCnt;
     pid_t mainPid;
     bool terminating;
+    bool exitUponCrash;
 
     const char *dictionaryFile;
      TAILQ_HEAD(strq_t, strings_t) dictq;
@@ -272,6 +273,7 @@ typedef struct {
 
     /* For the Linux code */
     struct {
+        int exeFd;
         hwcnt_t hwCnts;
         uint64_t dynamicCutOffAddr;
         bool disableRandomization;
@@ -288,6 +290,7 @@ typedef struct {
         size_t symsWlCnt;
         uintptr_t cloneFlags;
         bool kernelOnly;
+        bool useClone;
     } linux;
 } honggfuzz_t;
 

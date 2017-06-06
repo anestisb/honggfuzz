@@ -28,7 +28,7 @@ HFUZZ_CC_BINS := hfuzz_cc/hfuzz-clang hfuzz_cc/hfuzz-clang++ hfuzz_cc/hfuzz-gcc 
 HFUZZ_CC_SRCS := hfuzz_cc/hfuzz-cc.c
 COMMON_CFLAGS := -D_GNU_SOURCE -Wall -Werror -Wframe-larger-than=131072
 COMMON_LDFLAGS := -lm libcommon/libcommon.a
-COMMON_SRCS := $(wildcard *.c)
+COMMON_SRCS := $(sort $(wildcard *.c))
 CFLAGS ?= -O3
 LDFLAGS ?=
 LIBS_CFLAGS ?= -fPIC -fno-stack-protector -fno-builtin
@@ -40,12 +40,12 @@ ifeq ($(OS),Linux)
     ARCH := LINUX
 
     ARCH_CFLAGS := -std=c11 -I/usr/local/include -I/usr/include \
-                   -Wextra -Wno-initializer-overrides -Wno-override-init \
-                   -Wno-unknown-warning-option -funroll-loops \
+                   -Wextra -Wno-override-init \
+                   -funroll-loops \
                    -D_FILE_OFFSET_BITS=64
     ARCH_LDFLAGS := -L/usr/local/include -L/usr/include \
-                    -lpthread -lunwind-ptrace -lunwind-generic -lbfd -lopcodes -lrt
-    ARCH_SRCS := $(wildcard linux/*.c)
+                    -lpthread -lunwind-ptrace -lunwind-generic -lbfd -lopcodes -lrt -ldl
+    ARCH_SRCS := $(sort $(wildcard linux/*.c))
 
     ifeq ("$(wildcard /usr/include/bfd.h)","")
         WARN_LIBRARY += binutils-devel
@@ -124,11 +124,11 @@ else ifeq ($(OS),Darwin)
     ifeq ($(MIG_RET),1)
         $(error mig failed to generate RPC code)
     endif
-    ARCH_SRCS := $(wildcard mac/*.c)
+    ARCH_SRCS := $(sort $(wildcard mac/*.c))
     # OS Darwin
 else
     ARCH := POSIX
-    ARCH_SRCS := $(wildcard posix/*.c)
+    ARCH_SRCS := $(sort $(wildcard posix/*.c))
     ARCH_CFLAGS := -std=c11 -I/usr/local/include -I/usr/include \
                    -Wextra -Wno-initializer-overrides -Wno-override-init \
                    -Wno-unknown-warning-option -Wno-unknown-pragmas \
@@ -141,8 +141,9 @@ else
     # OS Posix
 endif
 
-COMPILER = $(shell $(CC) -v 2>&1 | grep -E '(gcc|clang) version' | grep -oE '(clang|gcc)')
+COMPILER = $(shell $(CC) -v 2>&1 | grep -oE '(gcc|clang) version' | grep -oE '(clang|gcc)' | head -n1)
 ifeq ($(COMPILER),clang)
+    ARCH_CFLAGS += -Wno-initializer-overrides -Wno-unknown-warning-option
     ARCH_CFLAGS += -fblocks
     ARCH_LDFLAGS += -lBlocksRuntime
 endif
@@ -153,6 +154,7 @@ OBJS := $(SRCS:.c=.o)
 LHFUZZ_SRCS := $(wildcard libhfuzz/*.c)
 LHFUZZ_OBJS := $(LHFUZZ_SRCS:.c=.o)
 LHFUZZ_ARCH := libhfuzz/libhfuzz.a
+LHFUZZ_INC ?= $(join $(shell pwd), /libhfuzz)
 
 LCOMMON_SRCS := $(wildcard libcommon/*.c)
 LCOMMON_OBJS := $(LCOMMON_SRCS:.c=.o)
@@ -244,7 +246,7 @@ $(BIN): $(OBJS) $(LCOMMON_ARCH)
 	$(LD) -o $(BIN) $(OBJS) $(LDFLAGS)
 
 $(HFUZZ_CC_BINS): $(LHFUZZ_ARCH) $(LCOMMON_ARCH) $(HFUZZ_CC_SRCS)
-	$(LD) -o $@ $(HFUZZ_CC_SRCS) $(LDFLAGS) $(CFLAGS)
+	$(LD) -o $@ $(HFUZZ_CC_SRCS) $(LDFLAGS) $(CFLAGS) -D_HFUZZ_LHFUZZ_INC_PATH=$(LHFUZZ_INC)
 
 $(LHFUZZ_OBJS): $(LHFUZZ_SRCS)
 	$(CC) -c $(LIBS_CFLAGS) $(CFLAGS) -o $@ $(@:.o=.c)
@@ -252,7 +254,7 @@ $(LHFUZZ_OBJS): $(LHFUZZ_SRCS)
 $(LHFUZZ_ARCH): $(LHFUZZ_OBJS) $(LCOMMON_ARCH)
 	$(AR) rcs $(LHFUZZ_ARCH) $(LHFUZZ_OBJS) $(LCOMMON_OBJS)
 
-$(LCOMMON_OBJS): $(LIBS_SRCS)
+$(LCOMMON_OBJS): $(LCOMMON_SRCS)
 	$(CC) -c $(LIBS_CFLAGS) $(CFLAGS) -o $@ $(@:.o=.c)
 
 $(LCOMMON_ARCH): $(LCOMMON_OBJS)
@@ -322,44 +324,43 @@ android-clean-deps:
 
 cmdline.o: cmdline.h libcommon/common.h libcommon/log.h libcommon/common.h
 cmdline.o: libcommon/files.h libcommon/util.h
-fuzz.o: libcommon/common.h fuzz.h libcommon/arch.h libcommon/common.h
-fuzz.o: libcommon/files.h libcommon/log.h libcommon/sanitizers.h
-fuzz.o: libcommon/sancov.h libcommon/sanitizers.h libcommon/util.h mangle.h
-fuzz.o: report.h subproc.h
-honggfuzz.o: libcommon/common.h libcommon/display.h libcommon/log.h
-honggfuzz.o: libcommon/common.h libcommon/files.h libcommon/util.h cmdline.h
-honggfuzz.o: fuzz.h
+display.o: libcommon/common.h display.h libcommon/log.h libcommon/common.h
+display.o: libcommon/util.h
+fuzz.o: libcommon/common.h fuzz.h libcommon/files.h libcommon/common.h
+fuzz.o: libcommon/log.h libcommon/util.h arch.h mangle.h report.h sancov.h
+fuzz.o: sanitizers.h subproc.h
+honggfuzz.o: libcommon/common.h libcommon/log.h libcommon/common.h
+honggfuzz.o: libcommon/files.h libcommon/util.h cmdline.h display.h fuzz.h
 mangle.o: libcommon/common.h mangle.h libcommon/log.h libcommon/common.h
 mangle.o: libcommon/util.h
 report.o: libcommon/common.h report.h libcommon/log.h libcommon/common.h
 report.o: libcommon/util.h
-subproc.o: libcommon/common.h subproc.h libcommon/arch.h libcommon/common.h
-subproc.o: libcommon/files.h libcommon/log.h libcommon/sanitizers.h
-subproc.o: libcommon/util.h
+sancov.o: libcommon/common.h sancov.h sanitizers.h libcommon/files.h
+sancov.o: libcommon/common.h libcommon/log.h libcommon/util.h
+sanitizers.o: libcommon/common.h sanitizers.h libcommon/files.h
+sanitizers.o: libcommon/common.h libcommon/log.h libcommon/util.h
+subproc.o: libcommon/common.h subproc.h libcommon/files.h libcommon/common.h
+subproc.o: libcommon/log.h libcommon/util.h arch.h sanitizers.h
 hfuzz_cc/hfuzz-cc.o: libcommon/common.h libcommon/files.h libcommon/common.h
 hfuzz_cc/hfuzz-cc.o: libcommon/log.h
-libcommon/display.o: libcommon/common.h libcommon/display.h libcommon/log.h
-libcommon/display.o: libcommon/util.h
 libcommon/files.o: libcommon/common.h libcommon/files.h libcommon/log.h
 libcommon/files.o: libcommon/util.h
-libcommon/log.o: libcommon/common.h libcommon/log.h libcommon/display.h
-libcommon/log.o: libcommon/util.h
-libcommon/sancov.o: libcommon/common.h libcommon/sancov.h
-libcommon/sancov.o: libcommon/sanitizers.h libcommon/files.h libcommon/log.h
-libcommon/sancov.o: libcommon/util.h
-libcommon/sanitizers.o: libcommon/common.h libcommon/sanitizers.h
-libcommon/sanitizers.o: libcommon/files.h libcommon/log.h libcommon/util.h
+libcommon/log.o: libcommon/common.h libcommon/log.h libcommon/util.h
+libcommon/ns.o: libcommon/common.h libcommon/ns.h libcommon/files.h
+libcommon/ns.o: libcommon/log.h
 libcommon/util.o: libcommon/common.h libcommon/util.h libcommon/files.h
 libcommon/util.o: libcommon/log.h
 libhfuzz/instrument.o: libcommon/common.h libcommon/util.h libcommon/log.h
 libhfuzz/instrument.o: libcommon/common.h
+libhfuzz/linux.o: libcommon/common.h libhfuzz/libhfuzz.h libcommon/log.h
+libhfuzz/linux.o: libcommon/common.h libcommon/files.h libcommon/ns.h
 libhfuzz/memorycmp.o: libhfuzz/instrument.h libcommon/common.h
 libhfuzz/memorycmp.o: libcommon/util.h
-libhfuzz/persistent.o: libcommon/common.h libcommon/log.h libcommon/common.h
-libhfuzz/persistent.o: libcommon/files.h
-linux/arch.o: libcommon/common.h libcommon/arch.h libcommon/common.h
-linux/arch.o: libcommon/files.h libcommon/log.h libcommon/sancov.h
-linux/arch.o: libcommon/sanitizers.h libcommon/util.h subproc.h linux/perf.h
+libhfuzz/persistent.o: libcommon/common.h libhfuzz/libhfuzz.h libcommon/log.h
+libhfuzz/persistent.o: libcommon/common.h libcommon/files.h
+linux/arch.o: libcommon/common.h arch.h libcommon/common.h libcommon/files.h
+linux/arch.o: libcommon/common.h libcommon/log.h libcommon/ns.h
+linux/arch.o: libcommon/util.h sancov.h sanitizers.h subproc.h linux/perf.h
 linux/arch.o: linux/ptrace_utils.h
 linux/bfd.o: libcommon/common.h linux/bfd.h linux/unwind.h libcommon/files.h
 linux/bfd.o: libcommon/common.h libcommon/log.h libcommon/util.h
@@ -369,13 +370,13 @@ linux/pt.o: libcommon/common.h linux/pt.h libcommon/log.h libcommon/common.h
 linux/pt.o: libcommon/util.h
 linux/ptrace_utils.o: libcommon/common.h linux/ptrace_utils.h
 linux/ptrace_utils.o: libcommon/files.h libcommon/common.h libcommon/log.h
-linux/ptrace_utils.o: libcommon/sancov.h libcommon/sanitizers.h
-linux/ptrace_utils.o: libcommon/util.h subproc.h linux/bfd.h linux/unwind.h
+linux/ptrace_utils.o: libcommon/util.h sancov.h sanitizers.h subproc.h
+linux/ptrace_utils.o: linux/bfd.h linux/unwind.h
 linux/unwind.o: libcommon/common.h linux/unwind.h libcommon/log.h
 linux/unwind.o: libcommon/common.h
-mac/arch.o: libcommon/common.h libcommon/arch.h libcommon/common.h
-mac/arch.o: libcommon/files.h libcommon/log.h libcommon/sancov.h
-mac/arch.o: libcommon/sanitizers.h libcommon/util.h subproc.h
-posix/arch.o: libcommon/common.h libcommon/arch.h libcommon/common.h
-posix/arch.o: libcommon/files.h libcommon/log.h libcommon/sancov.h
-posix/arch.o: libcommon/sanitizers.h libcommon/util.h subproc.h
+mac/arch.o: libcommon/common.h arch.h libcommon/common.h libcommon/files.h
+mac/arch.o: libcommon/common.h libcommon/log.h libcommon/util.h sancov.h
+mac/arch.o: sanitizers.h subproc.h
+posix/arch.o: libcommon/common.h arch.h libcommon/common.h libcommon/files.h
+posix/arch.o: libcommon/common.h libcommon/log.h libcommon/util.h sancov.h
+posix/arch.o: sanitizers.h subproc.h

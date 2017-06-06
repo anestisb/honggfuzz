@@ -186,6 +186,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         .threadsActiveCnt = 0,
         .mainPid = getpid(),
         .terminating = false,
+		.exitUponCrash = false,
 
         .dictionaryFile = NULL,
         .dictionaryCnt = 0,
@@ -232,6 +233,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
 
         /* Linux code */
         .linux = {
+            .exeFd = -1,
             .hwCnts = {
                 .cpuInstrCnt = 0ULL,
                 .cpuBranchCnt = 0ULL,
@@ -255,6 +257,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
             .symsWl = NULL,
             .cloneFlags = 0,
             .kernelOnly = false,
+            .useClone = true,
         },
     };
     /*  *INDENT-ON* */
@@ -281,7 +284,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         {{"extension", required_argument, NULL, 'e'}, "Input file extension (e.g. 'swf'), (default: 'fuzz')"},
         {{"workspace", required_argument, NULL, 'W'}, "Workspace directory to save crashes & runtime files (default: '.')"},
         {{"covdir", required_argument, NULL, 0x103}, "New coverage is written to a separate directory (default: use the input directory)"},
-        {{"wordlist", required_argument, NULL, 'w'}, "Wordlist file (tokens delimited by NUL-bytes)"},
+        {{"dict", required_argument, NULL, 'w'}, "Dictionary file. Format:http://llvm.org/docs/LibFuzzer.html#dictionaries"},
         {{"stackhash_bl", required_argument, NULL, 'B'}, "Stackhashes blacklist file (one entry per line)"},
         {{"mutate_cmd", required_argument, NULL, 'c'}, "External command producing fuzz files (instead of internal mutators)"},
         {{"pprocess_cmd", required_argument, NULL, 0x104}, "External command postprocessing files produced by internal mutators"},
@@ -297,6 +300,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         {{"sanitizers", no_argument, NULL, 'S'}, "Enable sanitizers settings (default: false)"},
         {{"monitor_sigabrt", required_argument, NULL, 0x105}, "Monitor SIGABRT (default: 'false for Android - 'true for other platforms)"},
         {{"no_fb_timeout", required_argument, NULL, 0x106}, "Skip feedback if the process has timeouted (default: 'false')"},
+        {{"exit_upon_crash", no_argument, NULL, 0x107}, "Exit upon seeing the first crash (default: 'false')"},
 
 #if defined(_HF_ARCH_LINUX)
         {{"linux_symbols_bl", required_argument, NULL, 0x504}, "Symbols blacklist filter file (one entry per line)"},
@@ -315,6 +319,7 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
         {{"linux_ns_net", no_argument, NULL, 0x0530}, "Use Linux NET namespace isolation"},
         {{"linux_ns_pid", no_argument, NULL, 0x0531}, "Use Linux PID namespace isolation"},
         {{"linux_ns_ipc", no_argument, NULL, 0x0532}, "Use Linux IPC namespace isolation"},
+        {{"linux_skip_glibc_check", no_argument, NULL, 0x0540}, "Don't FAIL() with outdated GLibC version (<2.23)"},
 #endif  // defined(_HF_ARCH_LINUX)
         {{0, 0, 0, 0}, NULL},
     };
@@ -423,6 +428,9 @@ bool cmdlineParse(int argc, char *argv[], honggfuzz_t * hfuzz)
             break;
         case 0x106:
             hfuzz->skipFeedbackOnTimeout = true;
+            break;
+        case 0x107:
+            hfuzz->exitUponCrash = true;
             break;
         case 'P':
             hfuzz->persistent = true;
