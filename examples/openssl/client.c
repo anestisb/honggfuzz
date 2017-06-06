@@ -12,6 +12,8 @@ extern "C" {
 #include <string.h>
 #include <unistd.h>
 
+#include <libhfuzz.h>
+
 static const uint8_t kCertificateDER[] = {
     0x30, 0x82, 0x05, 0x65, 0x30, 0x82, 0x03, 0x4d, 0x02, 0x09, 0x00, 0xe8,
     0x66, 0xed, 0xc9, 0x66, 0xa7, 0xd1, 0xac, 0x30, 0x0d, 0x06, 0x09, 0x2a,
@@ -656,7 +658,7 @@ int LLVMFuzzerInitialize(int* argc, char*** argv)
     return 1;
 }
 
-int LLVMFuzzerTestOneInput(uint8_t* buf, size_t len)
+int LLVMFuzzerTestOneInput(const uint8_t* buf, size_t len)
 {
     if (RAND_reset_for_fuzzing)
         RAND_reset_for_fuzzing();

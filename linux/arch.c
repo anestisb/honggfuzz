@@ -22,83 +22,47 @@
  */
 
 #include "../libcommon/common.h"
-#include "../libcommon/arch.h"
+#include "../arch.h"
 
-#include <arpa/inet.h>
 #include <ctype.h>
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <locale.h>
-#include <net/if.h>
-#include <net/route.h>
-#include <netinet/in.h>
-#include <netinet/ip.h>
+#include <setjmp.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <inttypes.h>
-#include <setjmp.h>
 #include <sys/cdefs.h>
 #include <sys/personality.h>
-#include <sys/ptrace.h>
 #include <sys/prctl.h>
-#include <sys/socket.h>
+#include <sys/ptrace.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
-#include <sys/time.h>
 #include <sys/types.h>
+#include <sys/time.h>
 #include <sys/user.h>
+#include <sys/utsname.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
-#include <sys/ioctl.h>
-#include <sys/mman.h>
-#include <sys/socket.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/utsname.h>
 
 #include "../libcommon/files.h"
 #include "../libcommon/log.h"
-#include "../libcommon/sancov.h"
+#include "../libcommon/ns.h"
 #include "../libcommon/util.h"
+#include "../sancov.h"
 #include "../subproc.h"
 #include "perf.h"
 #include "ptrace_utils.h"
 
 /* Size of remote pid cmdline char buffer */
 #define _HF_PROC_CMDLINE_SZ 8192
-
-static bool arch_ifaceUp(const char *ifacename)
-{
-    int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
-    if (sock == -1) {
-        PLOG_E("socket(AF_INET, SOCK_STREAM, IPPROTO_IP)");
-        return false;
-    }
-    defer {
-        close(sock);
-    };
-
-    struct ifreq ifr;
-    memset(&ifr, '\0', sizeof(ifr));
-    snprintf(ifr.ifr_name, IF_NAMESIZE, "%s", ifacename);
-
-    if (ioctl(sock, SIOCGIFFLAGS, &ifr) == -1) {
-        PLOG_E("ioctl(iface='%s', SIOCGIFFLAGS, IFF_UP)", ifacename);
-        return false;
-    }
-
-    ifr.ifr_flags |= (IFF_UP | IFF_RUNNING);
-
-    if (ioctl(sock, SIOCSIFFLAGS, &ifr) == -1) {
-        PLOG_E("ioctl(iface='%s', SIOCSIFFLAGS, IFF_UP|IFF_RUNNING)", ifacename);
-        return false;
-    }
-
-    return true;
-}
 
 static inline bool arch_shouldAttach(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 {
@@ -111,8 +75,7 @@ static inline bool arch_shouldAttach(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
     return true;
 }
 
-static uint8_t arch_clone_stack[PTHREAD_STACK_MIN * 2];
-
+static uint8_t arch_clone_stack[128 * 1024];
 static __thread jmp_buf env;
 
 #if defined(__has_feature)
@@ -144,61 +107,26 @@ static pid_t arch_clone(uintptr_t flags)
     return 0;
 }
 
-pid_t arch_fork(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
+pid_t arch_fork(honggfuzz_t * hfuzz, fuzzer_t * fuzzer UNUSED)
 {
-    arch_perfClose(hfuzz, fuzzer);
-
-    pid_t pid = arch_clone(hfuzz->linux.cloneFlags | CLONE_UNTRACED | SIGCHLD);
+    pid_t pid = hfuzz->linux.useClone ? arch_clone(CLONE_UNTRACED | SIGCHLD) : fork();
     if (pid == -1) {
         return pid;
     }
     if (pid == 0) {
-        if (hfuzz->linux.cloneFlags & CLONE_NEWNET) {
-            if (arch_ifaceUp("lo") == false) {
-                LOG_W("Cannot bring interface 'lo' up");
-            }
+        logMutexReset();
+        if (prctl(PR_SET_PDEATHSIG, (unsigned long)SIGKILL, 0UL, 0UL, 0UL) == -1) {
+            PLOG_W("prctl(PR_SET_PDEATHSIG, SIGKILL)");
         }
         return pid;
     }
-
-    /* Parent */
-    if (hfuzz->persistent) {
-        const struct f_owner_ex fown = {
-            .type = F_OWNER_TID,
-            .pid = syscall(__NR_gettid),
-        };
-        if (fcntl(fuzzer->persistentSock, F_SETOWN_EX, &fown)) {
-            PLOG_F("fcntl(%d, F_SETOWN_EX)", fuzzer->persistentSock);
-        }
-        if (fcntl(fuzzer->persistentSock, F_SETSIG, SIGIO) == -1) {
-            PLOG_F("fcntl(%d, F_SETSIG, SIGIO)", fuzzer->persistentSock);
-        }
-        if (fcntl(fuzzer->persistentSock, F_SETFL, O_ASYNC) == -1) {
-            PLOG_F("fcntl(%d, F_SETFL, O_ASYNC)", fuzzer->persistentSock);
-        }
-        int sndbuf = (1024 * 1024 * 2); /* 2MiB */
-        if (setsockopt(fuzzer->persistentSock, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf)) ==
-            -1) {
-            LOG_W("Couldn't set FD send buffer to '%d' bytes", sndbuf);
-        }
-    }
-
-    pid_t perf_pid = (hfuzz->linux.pid == 0) ? pid : hfuzz->linux.pid;
-    if (arch_perfOpen(perf_pid, hfuzz, fuzzer) == false) {
-        return -1;
-    }
-
     return pid;
 }
 
 bool arch_launchChild(honggfuzz_t * hfuzz, char *fileName)
 {
-    /*
-     * Kill the children when fuzzer dies (e.g. due to Ctrl+C)
-     */
-    if (prctl(PR_SET_PDEATHSIG, (long)SIGKILL, 0UL, 0UL, 0UL) == -1) {
-        PLOG_E("prctl(PR_SET_PDEATHSIG, SIGKILL) failed");
-        return false;
+    if ((hfuzz->linux.cloneFlags & CLONE_NEWNET) && (nsIfaceUp("lo") == false)) {
+        LOG_W("Cannot bring interface 'lo' up");
     }
 
     /*
@@ -218,11 +146,12 @@ bool arch_launchChild(honggfuzz_t * hfuzz, char *fileName)
     }
 
     /*
-     * Disable ASLR
+     * Disable ASLR:
+     * This might fail in Docker, as Docker blocks __NR_personality. Consequently
+     * it's just a debug warning
      */
-    if (hfuzz->linux.disableRandomization && personality(ADDR_NO_RANDOMIZE) == -1) {
-        PLOG_E("personality(ADDR_NO_RANDOMIZE) failed");
-        return false;
+    if (hfuzz->linux.disableRandomization && syscall(__NR_personality, ADDR_NO_RANDOMIZE) == -1) {
+        PLOG_D("personality(ADDR_NO_RANDOMIZE) failed");
     }
 #define ARGS_MAX 512
     char *args[ARGS_MAX + 2];
@@ -248,28 +177,63 @@ bool arch_launchChild(honggfuzz_t * hfuzz, char *fileName)
 
     LOG_D("Launching '%s' on file '%s'", args[0], hfuzz->persistent ? "PERSISTENT_MODE" : fileName);
 
+    /* alarm persists across forks, so disable it here */
+    alarm(0);
+
     /*
      * Wait for the ptrace to attach
      */
-    if (hfuzz->persistent == false) {
-        syscall(__NR_tkill, syscall(__NR_gettid), (uintptr_t) SIGSTOP);
+    if (kill(syscall(__NR_getpid), SIGSTOP) == -1) {
+        LOG_F("Couldn't stop itself");
     }
+#if defined(__NR_execveat)
+    syscall(__NR_execveat, hfuzz->linux.exeFd, "", args, environ, AT_EMPTY_PATH);
+#endif                          /* defined__NR_execveat) */
+    execve(args[0], args, environ);
+    int errno_cpy = errno;
+    alarm(1);
 
-    execvp(args[0], args);
-
-    PLOG_E("execvp('%s')", args[0]);
+    LOG_E("execve('%s', fd=%d): %s", args[0], hfuzz->linux.exeFd, strerror(errno_cpy));
 
     return false;
 }
 
-void arch_prepareChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
+void arch_prepareParentAfterFork(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
+{
+    arch_perfClose(hfuzz, fuzzer);
+
+    /* Parent */
+    if (hfuzz->persistent) {
+        const struct f_owner_ex fown = {
+            .type = F_OWNER_TID,
+            .pid = syscall(__NR_gettid),
+        };
+        if (fcntl(fuzzer->persistentSock, F_SETOWN_EX, &fown)) {
+            PLOG_F("fcntl(%d, F_SETOWN_EX)", fuzzer->persistentSock);
+        }
+        if (fcntl(fuzzer->persistentSock, F_SETSIG, SIGIO) == -1) {
+            PLOG_F("fcntl(%d, F_SETSIG, SIGIO)", fuzzer->persistentSock);
+        }
+        if (fcntl(fuzzer->persistentSock, F_SETFL, O_ASYNC) == -1) {
+            PLOG_F("fcntl(%d, F_SETFL, O_ASYNC)", fuzzer->persistentSock);
+        }
+    }
+
+    pid_t perf_pid = (hfuzz->linux.pid == 0) ? fuzzer->pid : hfuzz->linux.pid;
+    if (arch_perfOpen(perf_pid, hfuzz, fuzzer) == false) {
+        LOG_F("arch_perfOpen(pid=%d)", (int)perf_pid);
+    }
+}
+
+void arch_prepareParent(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 {
     pid_t ptracePid = (hfuzz->linux.pid > 0) ? hfuzz->linux.pid : fuzzer->pid;
     pid_t childPid = fuzzer->pid;
 
     if (arch_shouldAttach(hfuzz, fuzzer) == true) {
         if (arch_ptraceAttach(hfuzz, ptracePid) == false) {
-            LOG_F("arch_ptraceAttach(pid=%d) failed", ptracePid);
+            LOG_E("arch_ptraceAttach(pid=%d) failed", ptracePid);
+            kill(ptracePid, SIGKILL);
         }
         fuzzer->linux.attachedPid = ptracePid;
     }
@@ -297,7 +261,7 @@ void arch_prepareChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
     }
 
     if (arch_perfEnable(hfuzz, fuzzer) == false) {
-        LOG_F("Couldn't enable perf counters for pid %d", ptracePid);
+        LOG_E("Couldn't enable perf counters for pid %d", ptracePid);
     }
     if (childPid != ptracePid) {
         if (arch_ptraceWaitForPidStop(childPid) == false) {
@@ -363,6 +327,9 @@ static bool arch_checkWait(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 
 __thread sigset_t sset_io_chld;
 
+#if defined(__ANDROID__)
+int sigtimedwait(const sigset_t *, siginfo_t *, const struct timespec *);
+#endif                          /* defined(__ANDROID__) */
 void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 {
     static const struct timespec ts = {
@@ -370,7 +337,7 @@ void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
         .tv_nsec = 250000000L,
     };
     for (;;) {
-        int sig = syscall(__NR_rt_sigtimedwait, &sset_io_chld, NULL, &ts, _NSIG / 8);
+        int sig = sigtimedwait(&sset_io_chld, NULL, &ts);
         if (sig == -1 && (errno != EAGAIN && errno != EINTR)) {
             PLOG_F("sigtimedwait(SIGIO|SIGCHLD, 0.25s)");
         }
@@ -413,6 +380,39 @@ bool arch_archInit(honggfuzz_t * hfuzz)
 {
     /* Make %'d work */
     setlocale(LC_NUMERIC, "");
+
+    if (access(hfuzz->cmdline[0], X_OK) == -1) {
+        PLOG_E("File '%s' doesn't seem to be executable", hfuzz->cmdline[0]);
+        return false;
+    }
+    if ((hfuzz->linux.exeFd = open(hfuzz->cmdline[0], O_RDONLY | O_CLOEXEC)) == -1) {
+        PLOG_E("Cannot open the executable binary: %s)", hfuzz->cmdline[0]);
+        return false;
+    }
+
+    const char *(*gvs) (void) = dlsym(RTLD_DEFAULT, "gnu_get_libc_version");
+    for (;;) {
+        if (!gvs) {
+            LOG_W("Unknown libc implementation. Using clone() instead of fork()");
+            break;
+        }
+        const char *gversion = gvs();
+        int major, minor;
+        if (sscanf(gversion, "%d.%d", &major, &minor) != 2) {
+            LOG_W("Unknown glibc version:'%s'. Using clone() instead of fork()", gversion);
+            break;
+        }
+        if ((major < 2) || (major == 2 && minor < 23)) {
+            LOG_W("Your glibc version:'%s' will most likely result in malloc()-related "
+                  "deadlocks. Min. version 2.24 (Or, Ubuntu's 2.23-0ubuntu6) suggested. "
+                  "See https://sourceware.org/bugzilla/show_bug.cgi?id=19431 for explanation. "
+                  "Using clone() instead of fork()", gversion);
+            break;
+        }
+        LOG_D("Glibc version:'%s', OK", gversion);
+        hfuzz->linux.useClone = false;
+        break;
+    }
 
     if (hfuzz->dynFileMethod != _HF_DYNFILE_NONE) {
         unsigned long major = 0, minor = 0;
@@ -522,6 +522,11 @@ bool arch_archInit(honggfuzz_t * hfuzz)
      */
     if (hfuzz->enableSanitizers && hfuzz->monitorSIGABRT) {
         hfuzz->linux.numMajorFrames = 14;
+    }
+
+    if (hfuzz->linux.cloneFlags && unshare(hfuzz->linux.cloneFlags) == -1) {
+        LOG_E("unshare(%tx)", hfuzz->linux.cloneFlags);
+        return false;
     }
 
     return true;
