@@ -3,6 +3,7 @@ extern "C" {
 #endif
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /*
@@ -40,6 +41,8 @@ extern "C" {
     void HF_ITER(const uint8_t ** buf_ptr, size_t * len_ptr);
 
 #if defined(__linux__)
+
+#include <sched.h>
 
 /*
  * Enter Linux namespaces
