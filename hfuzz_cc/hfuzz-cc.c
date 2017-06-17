@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#include <libgen.h>
 #include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -15,6 +16,7 @@
 
 #include "../libcommon/files.h"
 #include "../libcommon/log.h"
+#include "../libcommon/util.h"
 
 #define ARGS_MAX 4096
 #define __XSTR(x) #x
@@ -62,6 +64,9 @@ static bool useUBSAN()
 static bool isLDMode(int argc, char **argv)
 {
     for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--version") == 0) {
+            return false;
+        }
         if (strcmp(argv[i], "-v") == 0) {
             return false;
         }
@@ -91,11 +96,20 @@ static int execCC(int argc, char **argv)
     }
     argv[argc] = NULL;
 
-    const char *cc_path = getenv("HFUZZ_CC_PATH");
-    if (cc_path != NULL) {
-        execvp(cc_path, argv);
-        PLOG_E("execvp('%s')", cc_path);
-        return EXIT_FAILURE;
+    if (isCXX) {
+        const char *cxx_path = getenv("HFUZZ_CXX_PATH");
+        if (cxx_path != NULL) {
+            execvp(cxx_path, argv);
+            PLOG_E("execvp('%s')", cxx_path);
+            return EXIT_FAILURE;
+        }
+    } else {
+        const char *cc_path = getenv("HFUZZ_CC_PATH");
+        if (cc_path != NULL) {
+            execvp(cc_path, argv);
+            PLOG_E("execvp('%s')", cc_path);
+            return EXIT_FAILURE;
+        }
     }
 
     if (isGCC) {
@@ -157,8 +171,6 @@ static void commonOpts(int *j, char **args)
         args[(*j)++] = "-fsanitize-coverage=trace-pc-guard,trace-cmp,indirect-calls";
         args[(*j)++] = "-mllvm";
         args[(*j)++] = "-sanitizer-coverage-prune-blocks=0";
-        args[(*j)++] = "-mllvm";
-        args[(*j)++] = "-sanitizer-coverage-block-threshold=10000000";
         args[(*j)++] = "-mllvm";
         args[(*j)++] = "-sanitizer-coverage-level=3";
     }
@@ -246,15 +258,6 @@ static int ldMode(int argc, char **argv)
         args[j++] = "cc";
     }
 
-    /*
-     * Include libhfuzz.a before everything else which might hijack
-     * functions we need, i.e. *cmp and LLVMFuzzer*
-     */
-    args[j++] = "-Wl,-z,muldefs";
-    args[j++] = "-Wl,--whole-archive";
-    args[j++] = LHFUZZ_A_PATH;
-    args[j++] = "-Wl,--no-whole-archive";
-
     /* Intercept common *cmp functions */
     args[j++] = "-Wl,--wrap=strcmp";
     args[j++] = "-Wl,--wrap=strcasecmp";
@@ -273,30 +276,37 @@ static int ldMode(int argc, char **argv)
 
     commonOpts(&j, args);
 
-    /* Repeat it, just in case anything late needs symbols in libhfuzz.a */
-    args[j++] = LHFUZZ_A_PATH;
-
+    /* libcommon.a will use it when compiled with clang */
 #if defined(__clang__)
     args[j++] = "-lBlocksRuntime";
 #endif                          /*  defined(__clang__) */
     args[j++] = "-lpthread";
 
-    return execCC(j, args);
     int i;
     for (i = 1; i < argc; i++) {
         args[j++] = argv[i];
     }
+
+    /*
+     * Include whole libhfuzz.a
+     */
+    args[j++] = "-Wl,-z,muldefs";
+    args[j++] = "-Wl,--whole-archive";
+    args[j++] = LHFUZZ_A_PATH;
+    args[j++] = "-Wl,--no-whole-archive";
+
+    return execCC(j, args);
 }
 
 int main(int argc, char **argv)
 {
-    if (strstr(argv[0], "++") != NULL) {
+    if (strstr(basename(util_StrDup(argv[0])), "++") != NULL) {
         isCXX = true;
     }
-    if (strstr(argv[0], "-gcc") != NULL) {
+    if (strstr(basename(util_StrDup(argv[0])), "-gcc") != NULL) {
         isGCC = true;
     }
-    if (strstr(argv[0], "-g++") != NULL) {
+    if (strstr(basename(util_StrDup(argv[0])), "-g++") != NULL) {
         isGCC = true;
     }
     if (argc <= 1) {

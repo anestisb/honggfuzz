@@ -13,6 +13,7 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
+APP_UNIFIED_HEADERS := true
 LOCAL_PATH := $(abspath $(call my-dir)/..)
 
 # Maintain a local copy since some NDK versions lose LOCAL_PATH scope at POST_BUILD_EVENT
@@ -135,7 +136,7 @@ COMMON_CFLAGS := -std=c11 -I. \
   -D_GNU_SOURCE \
   -Wall -Wextra -Wno-initializer-overrides -Wno-override-init \
   -Wno-unknown-warning-option -Werror -funroll-loops -O2 \
-  -Wframe-larger-than=51200
+  -Wframe-larger-than=51200 -Wno-format-truncation
 
 ifneq (,$(findstring clang,$(NDK_TOOLCHAIN)))
   COMMON_CFLAGS += -fblocks
