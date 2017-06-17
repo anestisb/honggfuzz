@@ -26,7 +26,7 @@ LD = $(CC)
 BIN := honggfuzz
 HFUZZ_CC_BINS := hfuzz_cc/hfuzz-clang hfuzz_cc/hfuzz-clang++ hfuzz_cc/hfuzz-gcc hfuzz_cc/hfuzz-g++
 HFUZZ_CC_SRCS := hfuzz_cc/hfuzz-cc.c
-COMMON_CFLAGS := -D_GNU_SOURCE -Wall -Werror -Wframe-larger-than=131072
+COMMON_CFLAGS := -D_GNU_SOURCE -Wall -Werror -Wframe-larger-than=131072 -Wno-format-truncation
 COMMON_LDFLAGS := -lm libcommon/libcommon.a
 COMMON_SRCS := $(sort $(wildcard *.c))
 CFLAGS ?= -O3
@@ -141,11 +141,16 @@ else
     # OS Posix
 endif
 
-COMPILER = $(shell $(CC) -v 2>&1 | grep -oE '(gcc|clang) version' | grep -oE '(clang|gcc)' | head -n1)
+COMPILER = $(shell $(CC) -v 2>&1 | \
+  grep -oE '((gcc|clang) version|LLVM version.*clang)' | \
+  grep -oE '(clang|gcc)' | head -n1)
 ifeq ($(COMPILER),clang)
-    ARCH_CFLAGS += -Wno-initializer-overrides -Wno-unknown-warning-option
-    ARCH_CFLAGS += -fblocks
+  ARCH_CFLAGS += -Wno-initializer-overrides -Wno-unknown-warning-option
+  ARCH_CFLAGS += -fblocks
+
+  ifneq ($(OS),Darwin)
     ARCH_LDFLAGS += -lBlocksRuntime
+  endif
 endif
 
 SRCS := $(COMMON_SRCS) $(ARCH_SRCS)
@@ -224,7 +229,7 @@ else
   endif
 endif
 
-SUBDIR_ROOTS := linux mac posix libhfuzz
+SUBDIR_ROOTS := linux mac posix libhfuzz libcommon
 DIRS := . $(shell find $(SUBDIR_ROOTS) -type d)
 CLEAN_PATTERNS := *.o *~ core *.a *.dSYM *.la *.so *.dylib
 SUBDIR_GARBAGE := $(foreach DIR,$(DIRS),$(addprefix $(DIR)/,$(CLEAN_PATTERNS)))
@@ -279,6 +284,9 @@ depend:
 
 .PHONY: android
 android:
+	$(info ***************************************************************)
+	$(info *                 Use Android NDK 15 or newer                 *)
+	$(info ***************************************************************)
 	@ANDROID_API=$(ANDROID_API) third_party/android/scripts/compile-libunwind.sh \
 	third_party/android/libunwind $(ANDROID_ARCH_CPU)
 
@@ -344,7 +352,7 @@ sanitizers.o: libcommon/common.h libcommon/log.h libcommon/util.h
 subproc.o: libcommon/common.h subproc.h libcommon/files.h libcommon/common.h
 subproc.o: libcommon/log.h libcommon/util.h arch.h sanitizers.h
 hfuzz_cc/hfuzz-cc.o: libcommon/common.h libcommon/files.h libcommon/common.h
-hfuzz_cc/hfuzz-cc.o: libcommon/log.h
+hfuzz_cc/hfuzz-cc.o: libcommon/log.h libcommon/util.h
 libcommon/files.o: libcommon/common.h libcommon/files.h libcommon/log.h
 libcommon/files.o: libcommon/util.h
 libcommon/log.o: libcommon/common.h libcommon/log.h libcommon/util.h
