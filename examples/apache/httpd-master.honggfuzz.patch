@@ -1,18 +1,27 @@
 diff --git a/compile.sh b/compile.sh
 new file mode 100755
-index 000000000..edf157719
+index 000000000..113411154
 --- /dev/null
 +++ b/compile.sh
-@@ -0,0 +1,4 @@
+@@ -0,0 +1,13 @@
 +#!/bin/sh
 +
-+CC=/usr/local/google/home/swiecki/src/honggfuzz/hfuzz_cc/hfuzz-clang CXX=$CC CPP=cpp LIBS="-L/home/swiecki/fuzz/apache/nghttp2-1.23.1/lib/ -fsanitize=address" CFLAGS="-fsanitize=address -I/home/swiecki/fuzz/apache/nghttp2-1.23.1/lib/includes -march=skylake -g -ggdb" LDFLAGS="$CFLAGS -ldl" ./configure --enable-unixd --disable-pie --enable-mods-static=few --prefix=/home/swiecki/fuzz/apache/apache2/ --with-mpm=event --enable-http2 --with-apr=/home/swiecki/fuzz/apache/apr-1.5.2/ --with-apr-util=/home/swiecki/fuzz/apache/apr-util-1.5.4/ --with-nghttp2=/home/swiecki/fuzz/apache/nghttp2-1.23.1 --enable-nghttp2-staticlib-deps
-+
++CC=/home/jagger/src/honggfuzz/hfuzz_cc/hfuzz-clang CXX="$CC" CFLAGS="-ggdb -O3 -fsanitize=address -I/home/jagger/fuzz/apache/nghttp2-1.23.1/lib/includes" LIBS="-L/home/jagger/fuzz/apache/nghttp2-1.23.1/lib" LDFLAGS="-lpthread" ./configure \
++		--prefix=/home/jagger/fuzz/apache/dist \
++		--enable-nghttp2-staticlib-deps \
++		--with-nghttp2=/home/jagger/fuzz/apache/nghttp2-1.23.1 \
++		--with-mpm=event \
++		--enable-unixd \
++		--disable-pie \
++		--enable-mods-static=most \
++		--enable-http2 \
++		--with-apr=/home/jagger/fuzz/apache/apr-1.6.2/ \
++		--with-apr-util=/home/jagger/fuzz/apache/apr-util-1.6.0/
 diff --git a/server/main.c b/server/main.c
-index bda60827c..a62df4cbf 100644
+index bda60827c..2e4abccfe 100644
 --- a/server/main.c
 +++ b/server/main.c
-@@ -459,8 +459,83 @@ static void usage(process_rec *process)
+@@ -459,8 +459,84 @@ static void usage(process_rec *process)
      destroy_and_exit_process(process, 1);
  }
  
@@ -47,6 +56,7 @@ index bda60827c..a62df4cbf 100644
 +    saddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 +    if (connect(myfd, &saddr, sizeof(saddr)) == -1) {
 +      perror("connect");
++      close(myfd);
 +      continue;
 +    }
 +
@@ -68,7 +78,7 @@ index bda60827c..a62df4cbf 100644
 +}
 +
 +static void LAUNCHTHR() {
-+  if (linuxEnterNs(CLONE_NEWUSER|CLONE_NEWNET|CLONE_NEWNS) == false) {
++  if (linuxEnterNs(CLONE_NEWUSER|CLONE_NEWNET|CLONE_NEWNS|CLONE_NEWIPC|CLONE_NEWUTS) == false) {
 +    exit(1);
 +  }
 +  if (linuxIfaceUp("lo") == false) {
@@ -98,6 +108,63 @@ index bda60827c..a62df4cbf 100644
      char c;
      int showcompile = 0, showdirectives = 0;
      const char *confname = SERVER_CONFIG_FILE;
+diff --git a/server/util.c b/server/util.c
+index d302764e3..e4848b2c8 100644
+--- a/server/util.c
++++ b/server/util.c
+@@ -27,6 +27,8 @@
+  * #define DEBUG_CFG_LINES  to trace every line read from the config files
+  */
+ 
++#include <libhfuzz.h>
++
+ #include "apr.h"
+ #include "apr_strings.h"
+ #include "apr_lib.h"
+@@ -3408,6 +3410,7 @@ static const short ucharmap[] = {
+ 
+ AP_DECLARE(int) ap_cstr_casecmp(const char *s1, const char *s2)
+ {
++    unsigned int z = 0;
+     const unsigned char *str1 = (const unsigned char *)s1;
+     const unsigned char *str2 = (const unsigned char *)s2;
+     for (;;)
+@@ -3416,15 +3419,19 @@ AP_DECLARE(int) ap_cstr_casecmp(const char *s1, const char *s2)
+         const int c2 = (int)(*str2);
+         const int cmp = ucharmap[c1] - ucharmap[c2];
+         /* Not necessary to test for !c2, this is caught by cmp */
+-        if (cmp || !c1)
++        if (cmp || !c1) {
++            instrumentCmpMap(__builtin_return_address(0), z);
+             return cmp;
++        }
+         str1++;
+         str2++;
++        z++;
+     }
+ }
+ 
+ AP_DECLARE(int) ap_cstr_casecmpn(const char *s1, const char *s2, apr_size_t n)
+ {
++    unsigned int z = 0;
+     const unsigned char *str1 = (const unsigned char *)s1;
+     const unsigned char *str2 = (const unsigned char *)s2;
+     while (n--)
+@@ -3433,10 +3440,13 @@ AP_DECLARE(int) ap_cstr_casecmpn(const char *s1, const char *s2, apr_size_t n)
+         const int c2 = (int)(*str2);
+         const int cmp = ucharmap[c1] - ucharmap[c2];
+         /* Not necessary to test for !c2, this is caught by cmp */
+-        if (cmp || !c1)
++        if (cmp || !c1) {
++            instrumentCmpMap(__builtin_return_address(0), z);
+             return cmp;
++        }
+         str1++;
+         str2++;
++        z++;
+     }
+     return 0;
+ }
 diff --git a/support/ab.c b/support/ab.c
 index 58769a9c8..ddf141bcc 100644
 --- a/support/ab.c
