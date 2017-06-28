@@ -1,6 +1,7 @@
-#include <unistd.h>
-
 #include "../libcommon/common.h"
+#include "instrument.h"
+
+#include <unistd.h>
 
 #include <ctype.h>
 #include <errno.h>
@@ -236,4 +237,9 @@ ATTRIBUTE_X86_REQUIRE_SSE42 void __sanitizer_cov_trace_pc_guard(uint32_t * guard
         ATOMIC_PRE_INC_RELAXED(feedback->pidFeedbackEdge[my_thread_no]);
     }
     *guard = 0U;
+}
+
+void instrumentCmpMap(void *addr, unsigned int n)
+{
+    instrumentUpdateCmpMap(addr, n);
 }
