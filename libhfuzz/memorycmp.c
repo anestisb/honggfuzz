@@ -57,7 +57,6 @@ static inline int _strncmp(const char *s1, const char *s2, size_t n, void *addr)
     return ret;
 }
 
-__attribute__ ((always_inline))
 static inline int _strncasecmp(const char *s1, const char *s2, size_t n, void *addr)
 {
     if (n == 0) {
@@ -104,7 +103,6 @@ static inline char *_strcasestr(const char *haystack, const char *needle, void *
     return NULL;
 }
 
-__attribute__ ((always_inline))
 static inline int _memcmp(const void *m1, const void *m2, size_t n, void *addr)
 {
     if (n == 0) {
@@ -129,8 +127,8 @@ static inline int _memcmp(const void *m1, const void *m2, size_t n, void *addr)
     return ret;
 }
 
-void *_memmem(const void *haystack, size_t haystacklen, const void *needle, size_t needlelen,
-              void *addr)
+static inline void *_memmem(const void *haystack, size_t haystacklen, const void *needle,
+                            size_t needlelen, void *addr)
 {
     if (needlelen > haystacklen) {
         return NULL;
@@ -146,6 +144,50 @@ void *_memmem(const void *haystack, size_t haystacklen, const void *needle, size
         }
     }
     return NULL;
+}
+
+/*
+ *  Exported wrappers taking return address as an argument
+ */
+int hfuzz_strcmp(const char *s1, const char *s2, void *addr)
+{
+    return _strcmp(s1, s2, addr);
+}
+
+int hfuzz_strcasecmp(const char *s1, const char *s2, void *addr)
+{
+    return _strcasecmp(s1, s2, addr);
+}
+
+int hfuzz_strncmp(const char *s1, const char *s2, size_t n, void *addr)
+{
+    return _strncmp(s1, s2, n, addr);
+}
+
+int hfuzz_strncasecmp(const char *s1, const char *s2, size_t n, void *addr)
+{
+    return _strncasecmp(s1, s2, n, addr);
+}
+
+char *hfuzz_strstr(const char *haystack, const char *needle, void *addr)
+{
+    return _strstr(haystack, needle, addr);
+}
+
+char *hfuzz_strcasestr(const char *haystack, const char *needle, void *addr)
+{
+    return _strcasestr(haystack, needle, addr);
+}
+
+int hfuzz_memcmp(const void *m1, const void *m2, size_t n, void *addr)
+{
+    return _memcmp(m1, m2, n, addr);
+}
+
+void *hfuzz_memmem(const void *haystack, size_t haystacklen, const void *needle, size_t needlelen,
+                   void *addr)
+{
+    return _memmem(haystack, haystacklen, needle, needlelen, addr);
 }
 
 /*
@@ -183,12 +225,12 @@ char *__wrap_strcasestr(const char *haystack, const char *needle)
 
 int __wrap_memcmp(const void *m1, const void *m2, size_t n)
 {
-    return (_memcmp(m1, m2, n, __builtin_return_address(0)));
+    return _memcmp(m1, m2, n, __builtin_return_address(0));
 }
 
 int __wrap_bcmp(const void *m1, const void *m2, size_t n)
 {
-    return (_memcmp(m1, m2, n, __builtin_return_address(0)));
+    return _memcmp(m1, m2, n, __builtin_return_address(0));
 }
 
 void *__wrap_memmem(const void *haystack, size_t haystacklen, const void *needle, size_t needlelen)

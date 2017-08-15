@@ -34,7 +34,10 @@ A security oriented, feedback-driven, evolutionary, easy-to-use fuzzer with inte
 Honggfuzz has been used to find a few interesting security problems in major software packages; An incomplete list:
 
   * [Pre-auth remote crash in __OpenSSH__](https://anongit.mindrot.org/openssh.git/commit/?id=28652bca29046f62c7045e933e6b931de1d16737)
-  * [Remote crash in __Apache__ mod\_http2 • CVE-2017-7659](http://seclists.org/oss-sec/2017/q2/504)
+  * __Apache__
+    * [Remote crash in __mod\_http2__ • CVE-2017-7659](http://seclists.org/oss-sec/2017/q2/504)
+    * [Use-after-free in __mod\_http2__ • CVE-2017-9789](http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2017-9789)
+    * [Memory leak in __mod\_auth\_digest__ • CVE-2017-9788](http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2017-9788)
   * __SSL__
     * [Remote OOB read in __OpenSSL__ • CVE-2015-1789]( https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2015-1789)
     * [Remote Use-after-Free (potential RCE, rated as __critical__) in __OpenSSL__ • CVE-2016-6309](https://www.openssl.org/news/secadv/20160926.txt)
@@ -49,7 +52,7 @@ Honggfuzz has been used to find a few interesting security problems in major sof
   * [Multiple bugs in the __poppler__ library](http://lists.freedesktop.org/archives/poppler/2010-November/006726.html)
   * [Multiple exploitable bugs in __IDA-Pro__](https://www.hex-rays.com/bugbounty.shtml)
   * [Remote DoS in __Crypto++__ • CVE-2016-9939](http://www.openwall.com/lists/oss-security/2016/12/12/7)
-  * [Multiple bugs in language interpreters: __PHP/Python/Ruby__](https://github.com/dyjakan/interpreter-bugs)
+  * Language interpreters: [__PHP/Python/Ruby__](https://github.com/dyjakan/interpreter-bugs), [PHP WDDX](https://bugs.php.net/bug.php?id=74145)
   * [Double-free in __LibXMP__](https://github.com/cmatsuoka/libxmp/commit/bd1eb5cfcd802820073504c234c3f735e96c3355)
   * [Heap buffer overflow in SAPCAR • CVE-2017-8852](https://www.coresecurity.com/blog/sapcar-heap-buffer-overflow-crash-exploit)
   * __FreeType 2__:
@@ -80,4 +83,6 @@ web server.
 
 **Other**
 
-This is NOT an official Google product.
+  * User mailing list: [honggfuzz@googlegroups.com](mailto:honggfuzz@googlegroups.com), sign up with [this link](https://groups.google.com/forum/#!forum/honggfuzz).
+
+__This is NOT an official Google product__
