@@ -45,6 +45,7 @@ Honggfuzz has been used to find a few interesting security problems in major sof
     * [Remote OOB read in __OpenSSL__ • CVE-2017-3731](https://www.openssl.org/news/secadv/20170126.txt)
     * [Uninitialized mem use in __OpenSSL__](https://github.com/openssl/openssl/commit/bd5d27c1c6d3f83464ddf5124f18a2cac2cbb37f)
     * [Crash in __LibreSSL__](https://github.com/openbsd/src/commit/c80d04452814d5b0e397817ce4ed34edb4eb520d)
+    * [Invalid free in __LibreSSL__](https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-2.6.2-relnotes.txt)
     * [Uninitialized mem use in __BoringSSL__](https://github.com/boringssl/boringssl/commit/7dccc71e08105b100c3acd56fa5f6fc1ba9b71d3)
   * [Adobe __Flash__ memory corruption • CVE-2015-0316](http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2015-0316)
   * [Multiple bugs in the __libtiff__ library](http://bugzilla.maptools.org/buglist.cgi?query_format=advanced;emailreporter1=1;email1=robert@swiecki.net;product=libtiff;emailtype1=substring)
@@ -52,7 +53,10 @@ Honggfuzz has been used to find a few interesting security problems in major sof
   * [Multiple bugs in the __poppler__ library](http://lists.freedesktop.org/archives/poppler/2010-November/006726.html)
   * [Multiple exploitable bugs in __IDA-Pro__](https://www.hex-rays.com/bugbounty.shtml)
   * [Remote DoS in __Crypto++__ • CVE-2016-9939](http://www.openwall.com/lists/oss-security/2016/12/12/7)
-  * Language interpreters: [__PHP/Python/Ruby__](https://github.com/dyjakan/interpreter-bugs), [PHP WDDX](https://bugs.php.net/bug.php?id=74145)
+  * Language interpreters
+    * [__PHP/Python/Ruby__](https://github.com/dyjakan/interpreter-bugs)
+    * [PHP WDDX](https://bugs.php.net/bug.php?id=74145)
+    * [PHP](https://bugs.php.net/bug.php?id=74194)
   * [Double-free in __LibXMP__](https://github.com/cmatsuoka/libxmp/commit/bd1eb5cfcd802820073504c234c3f735e96c3355)
   * [Heap buffer overflow in SAPCAR • CVE-2017-8852](https://www.coresecurity.com/blog/sapcar-heap-buffer-overflow-crash-exploit)
   * __FreeType 2__:
@@ -72,6 +76,8 @@ Honggfuzz has been used to find a few interesting security problems in major sof
   * [dyjakan's __interpreters fuzzing__ project](https://github.com/dyjakan/interpreter-bugs)
   * [__riufuzz__: honggfuzz with AFL-like UI](https://github.com/riusksk/riufuzz)
   * [__h2fuzz__: fuzzing of Apache's HTTP/2 implementation](https://github.com/icing/h2fuzz)
+  * [__honggfuzz-dharma__: honggfuzz with dharma grammar fuzzer](https://github.com/Sbouber/honggfuzz-dharma)
+  * [__Owl__: a system for finding concurrency attacks](https://github.com/hku-systems/owl)
 
 **Examples**
 
