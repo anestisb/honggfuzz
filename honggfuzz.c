@@ -23,23 +23,25 @@
  *
  */
 
-#include <inttypes.h>
 #include <getopt.h>
+#include <inttypes.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
 #include <fcntl.h>
 
-#include "libcommon/common.h"
-#include "libcommon/log.h"
-#include "libcommon/files.h"
-#include "libcommon/util.h"
 #include "cmdline.h"
 #include "display.h"
 #include "fuzz.h"
+#include "input.h"
+#include "libcommon/common.h"
+#include "libcommon/files.h"
+#include "libcommon/log.h"
+#include "libcommon/util.h"
 
 static int sigReceived = 0;
 
@@ -183,7 +185,7 @@ int main(int argc, char **argv)
         display_init();
     }
 
-    if (!files_init(&hfuzz)) {
+    if (!input_init(&hfuzz)) {
         if (hfuzz.externalCommand) {
             LOG_I
                 ("No input file corpus loaded, the external command '%s' is responsible for creating the fuzz files",
@@ -194,21 +196,21 @@ int main(int argc, char **argv)
         }
     }
 
-    if (hfuzz.dictionaryFile && (files_parseDictionary(&hfuzz) == false)) {
+    if (hfuzz.dictionaryFile && (input_parseDictionary(&hfuzz) == false)) {
         LOG_F("Couldn't parse dictionary file ('%s')", hfuzz.dictionaryFile);
     }
 
-    if (hfuzz.blacklistFile && (files_parseBlacklist(&hfuzz) == false)) {
+    if (hfuzz.blacklistFile && (input_parseBlacklist(&hfuzz) == false)) {
         LOG_F("Couldn't parse stackhash blacklist file ('%s')", hfuzz.blacklistFile);
     }
 #define hfuzzl hfuzz.linux
-    if (hfuzzl.symsBlFile &&
-        ((hfuzzl.symsBlCnt = files_parseSymbolFilter(hfuzzl.symsBlFile, &hfuzzl.symsBl)) == 0)) {
+    if (hfuzzl.symsBlFile
+        && ((hfuzzl.symsBlCnt = files_parseSymbolFilter(hfuzzl.symsBlFile, &hfuzzl.symsBl)) == 0)) {
         LOG_F("Couldn't parse symbols blacklist file ('%s')", hfuzzl.symsBlFile);
     }
 
-    if (hfuzzl.symsWlFile &&
-        ((hfuzzl.symsWlCnt = files_parseSymbolFilter(hfuzzl.symsWlFile, &hfuzzl.symsWl)) == 0)) {
+    if (hfuzzl.symsWlFile
+        && ((hfuzzl.symsWlCnt = files_parseSymbolFilter(hfuzzl.symsWlFile, &hfuzzl.symsWl)) == 0)) {
         LOG_F("Couldn't parse symbols whitelist file ('%s')", hfuzzl.symsWlFile);
     }
 

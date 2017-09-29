@@ -21,8 +21,7 @@
  *
  */
 
-#include "../libcommon/common.h"
-#include "../arch.h"
+#include "arch.h"
 
 #include <ctype.h>
 #include <dlfcn.h>
@@ -38,28 +37,25 @@
 #include <sys/cdefs.h>
 #include <sys/personality.h>
 #include <sys/prctl.h>
-#include <sys/ptrace.h>
-#include <sys/stat.h>
-#include <sys/mman.h>
-#include <sys/ioctl.h>
-#include <sys/stat.h>
 #include <sys/syscall.h>
-#include <sys/types.h>
 #include <sys/time.h>
+#include <sys/types.h>
 #include <sys/user.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
-#include "../libcommon/files.h"
-#include "../libcommon/log.h"
-#include "../libcommon/ns.h"
-#include "../libcommon/util.h"
-#include "../sancov.h"
-#include "../subproc.h"
-#include "perf.h"
-#include "ptrace_utils.h"
+#include "libcommon/common.h"
+#include "libcommon/files.h"
+#include "libcommon/log.h"
+#include "libcommon/ns.h"
+#include "libcommon/util.h"
+#include "linux/perf.h"
+#include "linux/trace.h"
+#include "sancov.h"
+#include "sanitizers.h"
+#include "subproc.h"
 
 /* Size of remote pid cmdline char buffer */
 #define _HF_PROC_CMDLINE_SZ 8192
@@ -231,8 +227,8 @@ void arch_prepareParent(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
     pid_t childPid = fuzzer->pid;
 
     if (arch_shouldAttach(hfuzz, fuzzer) == true) {
-        if (arch_ptraceAttach(hfuzz, ptracePid) == false) {
-            LOG_E("arch_ptraceAttach(pid=%d) failed", ptracePid);
+        if (arch_traceAttach(hfuzz, ptracePid) == false) {
+            LOG_E("arch_traceAttach(pid=%d) failed", ptracePid);
             kill(ptracePid, SIGKILL);
         }
         fuzzer->linux.attachedPid = ptracePid;
@@ -264,7 +260,7 @@ void arch_prepareParent(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
         LOG_E("Couldn't enable perf counters for pid %d", ptracePid);
     }
     if (childPid != ptracePid) {
-        if (arch_ptraceWaitForPidStop(childPid) == false) {
+        if (arch_traceWaitForPidStop(childPid) == false) {
             LOG_F("PID: %d not in a stopped state", childPid);
         }
         if (kill(childPid, SIGCONT) == -1) {
@@ -302,7 +298,7 @@ static bool arch_checkWait(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
 
         if (hfuzz->persistent && pid == fuzzer->persistentPid
             && (WIFEXITED(status) || WIFSIGNALED(status))) {
-            arch_ptraceAnalyze(hfuzz, status, pid, fuzzer);
+            arch_traceAnalyze(hfuzz, status, pid, fuzzer);
             fuzzer->persistentPid = 0;
             if (ATOMIC_GET(hfuzz->terminating) == false) {
                 LOG_W("Persistent mode: PID %d exited with status: %s", pid,
@@ -311,7 +307,7 @@ static bool arch_checkWait(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
             return true;
         }
         if (ptracePid == childPid) {
-            arch_ptraceAnalyze(hfuzz, status, pid, fuzzer);
+            arch_traceAnalyze(hfuzz, status, pid, fuzzer);
             continue;
         }
         if (pid == childPid && (WIFEXITED(status) || WIFSIGNALED(status))) {
@@ -321,7 +317,7 @@ static bool arch_checkWait(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
             continue;
         }
 
-        arch_ptraceAnalyze(hfuzz, status, pid, fuzzer);
+        arch_traceAnalyze(hfuzz, status, pid, fuzzer);
     }
 }
 
@@ -363,7 +359,7 @@ void arch_reapChild(honggfuzz_t * hfuzz, fuzzer_t * fuzzer)
                      crashReport, fuzzer->fileName);
 
                 /* Try to parse report file */
-                arch_ptraceExitAnalyze(hfuzz, ptracePid, fuzzer);
+                arch_traceExitAnalyze(hfuzz, ptracePid, fuzzer);
             }
         }
     }
@@ -429,8 +425,8 @@ bool arch_archInit(honggfuzz_t * hfuzz)
          *  3) Intel's PT and new Intel BTS format require kernel >= 4.1
          */
         unsigned long checkMajor = 3, checkMinor = 7;
-        if ((hfuzz->dynFileMethod & _HF_DYNFILE_BTS_EDGE) ||
-            (hfuzz->dynFileMethod & _HF_DYNFILE_IPT_BLOCK)) {
+        if ((hfuzz->dynFileMethod & _HF_DYNFILE_BTS_EDGE)
+            || (hfuzz->dynFileMethod & _HF_DYNFILE_IPT_BLOCK)) {
             checkMajor = 4;
             checkMinor = 1;
         }
@@ -508,7 +504,7 @@ bool arch_archInit(honggfuzz_t * hfuzz)
     }
 
     /* Updates the important signal array based on input args */
-    arch_ptraceSignalsInit(hfuzz);
+    arch_traceSignalsInit(hfuzz);
 
     /*
      * If sanitizer fuzzing enabled and SIGABRT is monitored (abort_on_error=1),

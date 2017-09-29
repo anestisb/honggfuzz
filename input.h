@@ -1,6 +1,6 @@
 /*
  *
- * honggfuzz - fuzzing routines
+ * honggfuzz - fetching input for fuzzing
  * -----------------------------------------
  *
  * Author: Robert Swiecki <swiecki@google.com>
@@ -21,14 +21,17 @@
  *
  */
 
-#ifndef _HF_FUZZ_H_
-#define _HF_FUZZ_H_
-
-#include <pthread.h>
+#ifndef _HF_INPUT_H_
+#define _HF_INPUT_H_
 
 #include "honggfuzz.h"
 
-extern void fuzz_threadsStart(honggfuzz_t * fuzz, pthread_t * threads);
-extern void fuzz_threadsStop(honggfuzz_t * fuzz, pthread_t * threads);
+extern bool input_getNext(honggfuzz_t * hfuzz, char *fname, bool rewind);
 
-#endif
+extern bool input_init(honggfuzz_t * hfuzz);
+
+extern bool input_parseDictionary(honggfuzz_t * hfuzz);
+
+extern bool input_parseBlacklist(honggfuzz_t * hfuzz);
+
+#endif                          /* ifndef _HF_INPUT_H_ */
