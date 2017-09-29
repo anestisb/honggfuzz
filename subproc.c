@@ -23,8 +23,6 @@
  *
  */
 
-#include "libcommon/common.h"
-
 #include "subproc.h"
 
 #include <errno.h>
@@ -41,10 +39,11 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "arch.h"
+#include "libcommon/common.h"
 #include "libcommon/files.h"
 #include "libcommon/log.h"
 #include "libcommon/util.h"
-#include "arch.h"
 #include "sanitizers.h"
 
 extern char **environ;

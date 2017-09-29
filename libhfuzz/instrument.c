@@ -1,4 +1,3 @@
-#include "../libcommon/common.h"
 #include "instrument.h"
 
 #include <unistd.h>
@@ -16,15 +15,17 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "../libcommon/util.h"
-#include "../libcommon/log.h"
+#include "honggfuzz.h"
+#include "libcommon/common.h"
+#include "libcommon/log.h"
+#include "libcommon/util.h"
 
 /*
  * We require SSE4.2 with x86-(32|64) for the 'popcnt', as it's much faster than the software
  * emulation of gcc/clang
  */
 #if defined(__x86_64__) || defined(__i386__)
-#define ATTRIBUTE_X86_REQUIRE_SSE42  __attribute__((__target__("sse4.2")))
+#define ATTRIBUTE_X86_REQUIRE_SSE42 __attribute__((__target__("sse4.2")))
 #else
 #define ATTRIBUTE_X86_REQUIRE_SSE42
 #endif                          /* defined(__x86_64__) || defined(__i386__) */
@@ -54,8 +55,8 @@ static void mapBB(void)
               sizeof(feedback_t));
     }
     if ((feedback =
-         mmap(NULL, sizeof(feedback_t), PROT_READ | PROT_WRITE, MAP_SHARED, _HF_BITMAP_FD,
-              0)) == MAP_FAILED) {
+         mmap(NULL, sizeof(feedback_t), PROT_READ | PROT_WRITE, MAP_SHARED, _HF_BITMAP_FD, 0))
+        == MAP_FAILED) {
         LOG_F("mmap: %s\n", strerror(errno));
     }
     feedback->pidFeedbackPc[my_thread_no] = 0U;

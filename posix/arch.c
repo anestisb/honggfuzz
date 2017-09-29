@@ -21,16 +21,15 @@
  *
  */
 
-#include "../libcommon/common.h"
-#include "../arch.h"
+#include "arch.h"
 
-#include <poll.h>
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/cdefs.h>
 #include <sys/resource.h>
@@ -41,19 +40,20 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "../libcommon/files.h"
-#include "../libcommon/log.h"
-#include "../libcommon/util.h"
-#include "../sancov.h"
-#include "../subproc.h"
+#include "libcommon/common.h"
+#include "libcommon/files.h"
+#include "libcommon/log.h"
+#include "libcommon/util.h"
+#include "sancov.h"
+#include "subproc.h"
 
 /*  *INDENT-OFF* */
 struct {
     bool important;
-    const char *descr;
+    const char* descr;
 } arch_sigs[NSIG] = {
-    [0 ... (NSIG - 1)].important = false,
-    [0 ... (NSIG - 1)].descr = "UNKNOWN",
+        [0 ...(NSIG - 1)].important = false,
+    [0 ...(NSIG - 1)].descr = "UNKNOWN",
 
     [SIGILL].important = true,
     [SIGILL].descr = "SIGILL",
@@ -140,9 +140,9 @@ static bool arch_analyzeSignal(honggfuzz_t * hfuzz, int status, fuzzer_t * fuzze
     ATOMIC_POST_INC(hfuzz->crashesCnt);
     ATOMIC_POST_INC(hfuzz->uniqueCrashesCnt);
 
-    if (files_writeBufToFile
-        (newname, fuzzer->dynamicFile, fuzzer->dynamicFileSz,
-         O_CREAT | O_EXCL | O_WRONLY) == false) {
+    if (files_writeBufToFile(newname, fuzzer->dynamicFile, fuzzer->dynamicFileSz,
+                             O_CREAT | O_EXCL | O_WRONLY)
+        == false) {
         LOG_E("Couldn't copy '%s' to '%s'", fuzzer->fileName, fuzzer->crashFileName);
     }
 

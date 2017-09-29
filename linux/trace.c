@@ -21,8 +21,7 @@
  *
  */
 
-#include "../libcommon/common.h"
-#include "ptrace_utils.h"
+#include "linux/trace.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -30,11 +29,11 @@
 #include <endian.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <inttypes.h>
 #include <sys/cdefs.h>
 #include <sys/personality.h>
 #include <sys/ptrace.h>
@@ -49,13 +48,15 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "../libcommon/files.h"
-#include "../libcommon/log.h"
-#include "../libcommon/util.h"
-#include "../sancov.h"
-#include "../subproc.h"
-#include "bfd.h"
-#include "unwind.h"
+#include "libcommon/common.h"
+#include "libcommon/files.h"
+#include "libcommon/log.h"
+#include "libcommon/util.h"
+#include "linux/bfd.h"
+#include "linux/unwind.h"
+#include "sancov.h"
+#include "sanitizers.h"
+#include "subproc.h"
 
 #if defined(__ANDROID__)
 #include "capstone.h"
@@ -63,19 +64,19 @@
 
 #if defined(__i386__) || defined(__arm__) || defined(__powerpc__)
 #define REG_TYPE uint32_t
-#define REG_PM   PRIx32
-#define REG_PD   "0x%08"
+#define REG_PM PRIx32
+#define REG_PD "0x%08"
 #elif defined(__x86_64__) || defined(__aarch64__) || defined(__powerpc64__) || defined(__mips__) || defined(__mips64__)
 #define REG_TYPE uint64_t
-#define REG_PM   PRIx64
-#define REG_PD   "0x%016"
+#define REG_PM PRIx64
+#define REG_PD "0x%016"
 #endif
 
 /*
  * Size in characters required to store a string representation of a
  * register value (0xdeadbeef style))
  */
-#define REGSIZEINCHAR   (2 * sizeof(REG_TYPE) + 3)
+#define REGSIZEINCHAR (2 * sizeof(REG_TYPE) + 3)
 
 #if defined(__i386__) || defined(__x86_64__)
 #define MAX_INSTR_SZ 16
@@ -245,11 +246,11 @@ struct user_regs_struct {
 
 /*  *INDENT-OFF* */
 static struct {
-    const char *descr;
+    const char* descr;
     bool important;
 } arch_sigs[_NSIG + 1] = {
-    [0 ... (_NSIG)].important = false,
-    [0 ... (_NSIG)].descr = "UNKNOWN",
+        [0 ...(_NSIG)].important = false,
+    [0 ...(_NSIG)].descr = "UNKNOWN",
 
     [SIGTRAP].important = false,
     [SIGTRAP].descr = "SIGTRAP",
@@ -281,7 +282,7 @@ static struct {
 /*  *INDENT-ON* */
 
 #ifndef SI_FROMUSER
-#define SI_FROMUSER(siptr)      ((siptr)->si_code <= 0)
+#define SI_FROMUSER(siptr) ((siptr)->si_code <= 0)
 #endif                          /* SI_FROMUSER */
 
 extern const char *sys_sigabbrev[];
@@ -352,7 +353,7 @@ static size_t arch_getProcMem(pid_t pid, uint8_t * buf, size_t len, REG_TYPE pc)
 
 static size_t arch_getPC(pid_t pid, REG_TYPE * pc, REG_TYPE * status_reg UNUSED)
 {
-    /*
+/*
      * Some old ARM android kernels are failing with PTRACE_GETREGS to extract
      * the correct register values if struct size is bigger than expected. As such the
      * 32/64-bit multiplexing trick is not working for them in case PTRACE_GETREGSET
@@ -372,7 +373,7 @@ static size_t arch_getPC(pid_t pid, REG_TYPE * pc, REG_TYPE * status_reg UNUSED)
     if (ptrace(PTRACE_GETREGSET, pid, NT_PRSTATUS, &pt_iov) == -1L) {
         PLOG_D("ptrace(PTRACE_GETREGSET) failed");
 
-        // If PTRACE_GETREGSET fails, try PTRACE_GETREGS if available
+// If PTRACE_GETREGSET fails, try PTRACE_GETREGS if available
 #if PTRACE_GETREGS_AVAILABLE
         if (ptrace(PTRACE_GETREGS, pid, 0, &regs)) {
             PLOG_D("ptrace(PTRACE_GETREGS) failed");
@@ -571,8 +572,8 @@ static void arch_hashCallstack(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, funcs_t *
 }
 
 static void
-arch_ptraceGenerateReport(pid_t pid, fuzzer_t * fuzzer, funcs_t * funcs, size_t funcCnt,
-                          siginfo_t * si, const char *instr)
+arch_traceGenerateReport(pid_t pid, fuzzer_t * fuzzer, funcs_t * funcs, size_t funcCnt,
+                         siginfo_t * si, const char *instr)
 {
     fuzzer->report[0] = '\0';
     util_ssnprintf(fuzzer->report, sizeof(fuzzer->report), "ORIG_FNAME: %s\n",
@@ -604,7 +605,7 @@ arch_ptraceGenerateReport(pid_t pid, fuzzer_t * fuzzer, funcs_t * funcs, size_t 
 #endif
     }
 
-    // libunwind is not working for 32bit targets in 64bit systems
+// libunwind is not working for 32bit targets in 64bit systems
 #if defined(__aarch64__)
     if (funcCnt == 0) {
         util_ssnprintf(fuzzer->report, sizeof(fuzzer->report), " !ERROR: If 32bit fuzz target"
@@ -615,7 +616,7 @@ arch_ptraceGenerateReport(pid_t pid, fuzzer_t * fuzzer, funcs_t * funcs, size_t 
     return;
 }
 
-static void arch_ptraceAnalyzeData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzzer)
+static void arch_traceAnalyzeData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzzer)
 {
     REG_TYPE pc = 0, status_reg = 0;
     size_t pcRegSz = arch_getPC(pid, &pc, &status_reg);
@@ -660,7 +661,7 @@ static void arch_ptraceAnalyzeData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fu
     arch_hashCallstack(hfuzz, fuzzer, funcs, funcCnt, false);
 }
 
-static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzzer)
+static void arch_traceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzzer)
 {
     REG_TYPE pc = 0;
 
@@ -677,8 +678,8 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
 
     arch_getInstrStr(pid, &pc, instr);
 
-    LOG_D("Pid: %d, signo: %d, errno: %d, code: %d, addr: %p, pc: %"
-          REG_PM ", instr: '%s'", pid, si.si_signo, si.si_errno, si.si_code, si.si_addr, pc, instr);
+    LOG_D("Pid: %d, signo: %d, errno: %d, code: %d, addr: %p, pc: %" REG_PM ", instr: '%s'", pid,
+          si.si_signo, si.si_errno, si.si_code, si.si_addr, pc, instr);
 
     if (!SI_FROMUSER(&si) && pc && si.si_addr < hfuzz->linux.ignoreAddr) {
         LOG_I("'%s' is interesting (%s), but the si.si_addr is %p (below %p), skipping",
@@ -839,9 +840,9 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
         return;
     }
 
-    if (files_writeBufToFile
-        (fuzzer->crashFileName, fuzzer->dynamicFile, fuzzer->dynamicFileSz,
-         O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC) == false) {
+    if (files_writeBufToFile(fuzzer->crashFileName, fuzzer->dynamicFile, fuzzer->dynamicFileSz,
+                             O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC)
+        == false) {
         LOG_E("Couldn't copy '%s' to '%s'", fuzzer->fileName, fuzzer->crashFileName);
         return;
     }
@@ -852,7 +853,7 @@ static void arch_ptraceSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzze
     /* If unique crash found, reset dynFile counter */
     ATOMIC_CLEAR(hfuzz->dynFileIterExpire);
 
-    arch_ptraceGenerateReport(pid, fuzzer, funcs, funcCnt, &si, instr);
+    arch_traceGenerateReport(pid, fuzzer, funcs, funcCnt, &si, instr);
 }
 
 /* TODO: Add report parsing support for other sanitizers too */
@@ -984,7 +985,7 @@ static int arch_parseAsanReport(honggfuzz_t * hfuzz, pid_t pid, funcs_t * funcs,
  * a raised signal. Such case is the ASan fuzzing for Android. Crash file name maintains
  * the same format for compatibility with post campaign tools.
  */
-static void arch_ptraceExitSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzzer)
+static void arch_traceExitSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzzer)
 {
     REG_TYPE pc = 0;
     void *crashAddr = 0;
@@ -1128,7 +1129,7 @@ static void arch_ptraceExitSaveData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * f
     }
 }
 
-static void arch_ptraceExitAnalyzeData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzzer)
+static void arch_traceExitAnalyzeData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzzer)
 {
     void *crashAddr = 0;
     char *op = "UNKNOWN";
@@ -1155,24 +1156,23 @@ static void arch_ptraceExitAnalyzeData(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t 
     arch_hashCallstack(hfuzz, fuzzer, funcs, funcCnt, false);
 }
 
-void arch_ptraceExitAnalyze(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzzer)
+void arch_traceExitAnalyze(honggfuzz_t * hfuzz, pid_t pid, fuzzer_t * fuzzer)
 {
     if (fuzzer->mainWorker) {
         /* Main fuzzing threads */
-        arch_ptraceExitSaveData(hfuzz, pid, fuzzer);
+        arch_traceExitSaveData(hfuzz, pid, fuzzer);
     } else {
         /* Post crash analysis (e.g. crashes verifier) */
-        arch_ptraceExitAnalyzeData(hfuzz, pid, fuzzer);
+        arch_traceExitAnalyzeData(hfuzz, pid, fuzzer);
     }
 }
 
 #define __WEVENT(status) ((status & 0xFF0000) >> 16)
-static void arch_ptraceEvent(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, int status, pid_t pid)
+static void arch_traceEvent(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, int status, pid_t pid)
 {
     LOG_D("PID: %d, Ptrace event: %d", pid, __WEVENT(status));
     switch (__WEVENT(status)) {
-    case PTRACE_EVENT_EXIT:
-        {
+    case PTRACE_EVENT_EXIT:{
             unsigned long event_msg;
             if (ptrace(PTRACE_GETEVENTMSG, pid, NULL, &event_msg) == -1) {
                 PLOG_E("ptrace(PTRACE_GETEVENTMSG,%d) failed", pid);
@@ -1183,7 +1183,7 @@ static void arch_ptraceEvent(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, int status,
                 LOG_D("PID: %d exited with exit_code: %lu", pid,
                       (unsigned long)WEXITSTATUS(event_msg));
                 if (WEXITSTATUS(event_msg) == (unsigned long)HF_SAN_EXIT_CODE) {
-                    arch_ptraceExitAnalyze(hfuzz, pid, fuzzer);
+                    arch_traceExitAnalyze(hfuzz, pid, fuzzer);
                 }
             } else if (WIFSIGNALED(event_msg)) {
                 LOG_D("PID: %d terminated with signal: %lu", pid,
@@ -1200,13 +1200,13 @@ static void arch_ptraceEvent(honggfuzz_t * hfuzz, fuzzer_t * fuzzer, int status,
     ptrace(PTRACE_CONT, pid, 0, 0);
 }
 
-void arch_ptraceAnalyze(honggfuzz_t * hfuzz, int status, pid_t pid, fuzzer_t * fuzzer)
+void arch_traceAnalyze(honggfuzz_t * hfuzz, int status, pid_t pid, fuzzer_t * fuzzer)
 {
     /*
      * It's a ptrace event, deal with it elsewhere
      */
     if (WIFSTOPPED(status) && __WEVENT(status)) {
-        return arch_ptraceEvent(hfuzz, fuzzer, status, pid);
+        return arch_traceEvent(hfuzz, fuzzer, status, pid);
     }
 
     if (WIFSTOPPED(status)) {
@@ -1219,9 +1219,9 @@ void arch_ptraceAnalyze(honggfuzz_t * hfuzz, int status, pid_t pid, fuzzer_t * f
              * analysis. Otherwise just unwind and get stack hash signature.
              */
             if (fuzzer->mainWorker) {
-                arch_ptraceSaveData(hfuzz, pid, fuzzer);
+                arch_traceSaveData(hfuzz, pid, fuzzer);
             } else {
-                arch_ptraceAnalyzeData(hfuzz, pid, fuzzer);
+                arch_traceAnalyzeData(hfuzz, pid, fuzzer);
             }
         }
         /* Do not deliver SIGSTOP, as we don't support PTRACE_LISTEN anyway */
@@ -1245,7 +1245,7 @@ void arch_ptraceAnalyze(honggfuzz_t * hfuzz, int status, pid_t pid, fuzzer_t * f
          * Target exited with sanitizer defined exitcode (used when SIGABRT is not monitored)
          */
         if (WEXITSTATUS(status) == (unsigned long)HF_SAN_EXIT_CODE) {
-            arch_ptraceExitAnalyze(hfuzz, pid, fuzzer);
+            arch_traceExitAnalyze(hfuzz, pid, fuzzer);
         }
         return;
     }
@@ -1315,7 +1315,7 @@ static bool arch_listThreads(int tasks[], size_t thrSz, int pid)
     return true;
 }
 
-bool arch_ptraceWaitForPidStop(pid_t pid)
+bool arch_traceWaitForPidStop(pid_t pid)
 {
     for (;;) {
         int status;
@@ -1336,7 +1336,7 @@ bool arch_ptraceWaitForPidStop(pid_t pid)
 }
 
 #define MAX_THREAD_IN_TASK 4096
-bool arch_ptraceAttach(honggfuzz_t * hfuzz, pid_t pid)
+bool arch_traceAttach(honggfuzz_t * hfuzz, pid_t pid)
 {
 /*
  * It should be present since, at least, Linux kernel 3.8, but
@@ -1354,7 +1354,7 @@ bool arch_ptraceAttach(honggfuzz_t * hfuzz, pid_t pid)
         seize_options |= PTRACE_O_TRACEEXIT;
     }
 
-    if (hfuzz->linux.pid == 0 && arch_ptraceWaitForPidStop(pid) == false) {
+    if (hfuzz->linux.pid == 0 && arch_traceWaitForPidStop(pid) == false) {
         return false;
     }
 
@@ -1389,7 +1389,7 @@ bool arch_ptraceAttach(honggfuzz_t * hfuzz, pid_t pid)
     return true;
 }
 
-void arch_ptraceDetach(pid_t pid)
+void arch_traceDetach(pid_t pid)
 {
     if (syscall(__NR_kill, pid, 0) == -1 && errno == ESRCH) {
         LOG_D("PID: %d no longer exists", pid);
@@ -1404,12 +1404,12 @@ void arch_ptraceDetach(pid_t pid)
 
     for (int i = 0; i < MAX_THREAD_IN_TASK && tasks[i]; i++) {
         ptrace(PTRACE_INTERRUPT, tasks[i], NULL, NULL);
-        arch_ptraceWaitForPidStop(tasks[i]);
+        arch_traceWaitForPidStop(tasks[i]);
         ptrace(PTRACE_DETACH, tasks[i], NULL, NULL);
     }
 }
 
-void arch_ptraceSignalsInit(honggfuzz_t * hfuzz)
+void arch_traceSignalsInit(honggfuzz_t * hfuzz)
 {
     /* Default is true for all platforms except Android */
     arch_sigs[SIGABRT].important = hfuzz->monitorSIGABRT;

@@ -21,24 +21,24 @@
  *
  */
 
-#include "../libcommon/common.h"
-#include "bfd.h"
+#include "linux/bfd.h"
 
 #include <bfd.h>
 #include <dis-asm.h>
+#include <inttypes.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <stddef.h>
-#include <stdio.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <inttypes.h>
 #include <unistd.h>
 
-#include "../libcommon/files.h"
-#include "../libcommon/log.h"
-#include "../libcommon/util.h"
+#include "libcommon/common.h"
+#include "libcommon/files.h"
+#include "libcommon/log.h"
+#include "libcommon/util.h"
 
 typedef struct {
     bfd *bfdh;
